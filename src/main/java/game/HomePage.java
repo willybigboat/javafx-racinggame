@@ -18,7 +18,7 @@ public class HomePage {
 
     @SuppressWarnings("exports")
     public Parent createContent() {
-        RaceTrackCanvas canvas = new RaceTrackCanvas(600, 1000);
+        RaceTrackCanvas canvas = new RaceTrackCanvas(600, 800);
 
         Label titleLabel = new Label("賽車遊戲");
         titleLabel.setStyle("-fx-font-size: 60px; -fx-font-weight: bold; -fx-text-fill: #222; -fx-effect: dropshadow(gaussian, #FFD700, 10, 0.5, 0, 0);");
@@ -46,10 +46,10 @@ public class HomePage {
         VBox contentBox = new VBox(30, titleLabel, singlePlayerButton, multiPlayerButton);
         contentBox.setAlignment(Pos.CENTER);
         contentBox.setPadding(new Insets(50));
-        contentBox.setMouseTransparent(true);
+        //contentBox.setMouseTransparent(true);
 
         StackPane root = new StackPane(canvas, contentBox);
-        root.setPrefSize(600, 1000);
+        root.setPrefSize(800, 600);
 
         return root;
     }
