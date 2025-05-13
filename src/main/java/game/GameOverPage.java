@@ -52,6 +52,7 @@ public class GameOverPage {
         homeButton.setOnAction(event -> app.switchToHomePage());
 
         VBox layout = new VBox(30);
+        layout.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
         layout.setAlignment(Pos.CENTER);
         layout.setPadding(new Insets(50));
         layout.getChildren().addAll(

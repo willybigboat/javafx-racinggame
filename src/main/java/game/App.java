@@ -6,6 +6,10 @@ import javafx.stage.Stage;
 
 public class App extends Application {
 
+    // 定義統一的視窗大小常數
+    public static final double WINDOW_WIDTH = 600;
+    public static final double WINDOW_HEIGHT = 800;
+
     private Stage primaryStage;
     private Scene homeScene, singlePlayerScene, multiPlayerScene, gameOverScene;
     private GameOverPage gameOverPage;
@@ -16,17 +20,21 @@ public class App extends Application {
         this.primaryStage = primaryStage;
         primaryStage.setTitle("賽車遊戲");
 
+        // 設定視窗最小大小
+        primaryStage.setMinWidth(WINDOW_WIDTH);
+        primaryStage.setMinHeight(WINDOW_HEIGHT);
+
         // 建立各個頁面的實例
         HomePage homePage = new HomePage(this);
         singlePlayerPage = new SinglePlayerPage(this);
         MultiPlayerPage multiPlayerPage = new MultiPlayerPage(this);
         gameOverPage = new GameOverPage(this);
 
-        // 建立場景
-        homeScene = new Scene(homePage.createContent(), 600, 800);
-        singlePlayerScene = new Scene(singlePlayerPage.createContent(), 600, 800);
-        multiPlayerScene = new Scene(multiPlayerPage.createContent(), 600, 800);
-        gameOverScene = new Scene(gameOverPage.createContent(), 600, 800);
+        // 建立場景並使用統一大小
+        homeScene = new Scene(homePage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
+        singlePlayerScene = new Scene(singlePlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
+        multiPlayerScene = new Scene(multiPlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
+        gameOverScene = new Scene(gameOverPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // 顯示首頁
         primaryStage.setScene(homeScene);
@@ -34,14 +42,16 @@ public class App extends Application {
     }
 
     // 切換到單人模式頁面
-    public void switchToSinglePlayer() {
-        singlePlayerPage = new SinglePlayerPage(this);
+    public void switchToSinglePlayer() {        
         singlePlayerScene = new Scene(singlePlayerPage.createContent());
 
         // 在場景層級也添加鍵盤事件處理
         singlePlayerScene.setOnKeyPressed(event -> singlePlayerPage.handleKeyPress(event));
 
         primaryStage.setScene(singlePlayerScene);
+
+        // 在場景切換完成後啟動遊戲
+        singlePlayerPage.startGame();
     }
 
     // 切換到連線模式頁面
@@ -64,16 +74,7 @@ public class App extends Application {
 
     // 重新開始遊戲
     public void restartGame() {
-        // 創建新的單人遊戲頁面
-        singlePlayerPage = new SinglePlayerPage(this);
-        singlePlayerScene = new Scene(singlePlayerPage.createContent());
-
-        // 設定鍵盤控制
-        singlePlayerScene.setOnKeyPressed(singlePlayerPage::handleKeyPress);
-        //singlePlayerScene.setOnKeyReleased(singlePlayerPage::handleKeyRelease);
-
-        // 切換到新的遊戲場景
-        primaryStage.setScene(singlePlayerScene);
+        switchToSinglePlayer();  // 使用現有的切換方法
     }
 
     public static void main(String[] args) {
