@@ -20,6 +20,7 @@ public class MultiPlayerPage {
     @SuppressWarnings("exports")
     public Parent createContent() {
         rootPane = new StackPane();
+        rootPane.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
         showWaitingPage();
         return rootPane;
     }
