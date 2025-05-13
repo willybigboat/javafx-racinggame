@@ -14,18 +14,23 @@ public class RaceTrackCanvas extends Canvas {
     private static final double HEIGHT = 800;
     private static final int LANES = 4;
     
-    // 賽道透視參數
-    private static final double TRACK_BOTTOM_WIDTH = 400;  // 縮小賽道寬度
-    private static final double TRACK_TOP_WIDTH = 100;     // 縮小賽道寬度
-    private static final double GRASS_EXTRA_WIDTH = 60;    // 草地額外寬度
-    private static final double TRACK_START_Y = HEIGHT * 0.2; // 賽道起始位置（頂部）
-    private static final double VANISHING_POINT_X = WIDTH / 2; // 消失點X座標
+    // 修改賽道透視參數
+    private static final double TRACK_START_Y = HEIGHT * 0.44; // 調整起始位置更靠上
+    private static final double TRACK_BOTTOM_Y = HEIGHT ; // 調整底部位置
+    private static final double TRACK_BOTTOM_WIDTH = 400;    
+    private static final double TRACK_TOP_WIDTH = 200;      
+    private static final double GRASS_EXTRA_WIDTH = 80;     
 
     private double offset = 0;
     private double speed = 2;
 
     public RaceTrackCanvas(double width, double height) {
         super(width, height);
+        
+        // 監聽畫布大小變化
+        widthProperty().addListener((obs, oldVal, newVal) -> draw());
+        heightProperty().addListener((obs, oldVal, newVal) -> draw());
+        
         startAnimation();
     }
 
@@ -46,24 +51,47 @@ public class RaceTrackCanvas extends Canvas {
     }
 
     private void render() {
+        draw();
+    }
+
+    private void draw() {
+        // 使用當前實際寬高
+        double width = getWidth();
+        double height = getHeight();
+        
+        // 重新繪製賽道
         GraphicsContext gc = getGraphicsContext2D();
         
-        // 清除畫布
-        gc.setFill(Color.SKYBLUE);
-        gc.fillRect(0, 0, WIDTH, HEIGHT);
-        
+        // 繪製天空漸層
+        LinearGradient skyGradient = new LinearGradient(
+            0, 0,
+            0, TRACK_START_Y,  // 調整漸層結束位置
+            false, CycleMethod.NO_CYCLE,
+            new Stop(0, Color.web("#87CEEB")),
+            new Stop(1, Color.web("#E0F6FF"))
+        );
+        gc.setFill(skyGradient);
+        gc.fillRect(0, 0, width, height);
+
+        // 繪製遠處的雲朵
+        drawClouds(gc);
+
+        // 繪製草地
+        gc.setFill(Color.web("#90EE90"));
+        gc.fillRect(0, TRACK_START_Y, width, height - TRACK_START_Y);
+
         // 繪製賽道主體（梯形）
         double[] xPoints = {
-            (WIDTH - TRACK_BOTTOM_WIDTH) / 2,
-            (WIDTH - TRACK_TOP_WIDTH) / 2,
-            (WIDTH + TRACK_TOP_WIDTH) / 2,
-            (WIDTH + TRACK_BOTTOM_WIDTH) / 2
+            (width - TRACK_BOTTOM_WIDTH) / 2,
+            (width - TRACK_TOP_WIDTH) / 2,
+            (width + TRACK_TOP_WIDTH) / 2,
+            (width + TRACK_BOTTOM_WIDTH) / 2
         };
         double[] yPoints = {
-            HEIGHT,
+            TRACK_BOTTOM_Y,  // 修改底部位置
             TRACK_START_Y,
             TRACK_START_Y,
-            HEIGHT
+            TRACK_BOTTOM_Y   // 修改底部位置
         };
         gc.setFill(Color.DIMGRAY);
         gc.fillPolygon(xPoints, yPoints, 4);
@@ -75,50 +103,15 @@ public class RaceTrackCanvas extends Canvas {
         for (int i = 1; i < LANES; i++) {
             double startX = xPoints[0] + (TRACK_BOTTOM_WIDTH * i / LANES);
             double endX = xPoints[1] + (TRACK_TOP_WIDTH * i / LANES);
-            gc.strokeLine(startX, HEIGHT, endX, TRACK_START_Y);
+            gc.strokeLine(startX, TRACK_BOTTOM_Y, endX, TRACK_START_Y);
         }
         gc.setLineDashes(null);        
 
         // 繪製賽道邊線
         gc.setStroke(Color.WHITE);
         gc.setLineWidth(3);
-        gc.strokeLine(xPoints[0], HEIGHT, xPoints[1], TRACK_START_Y);
-        gc.strokeLine(xPoints[3], HEIGHT, xPoints[2], TRACK_START_Y);
-
-        // 繪製內側草地（加寬版本）
-        gc.setFill(Color.LIMEGREEN);
-        // 左側草地
-        gc.fillPolygon(
-            new double[]{
-                xPoints[0] - GRASS_EXTRA_WIDTH,           // 底部外側
-                xPoints[1] - (GRASS_EXTRA_WIDTH * 0.3),   // 頂部外側（因透視效果縮小）
-                xPoints[0],                               // 底部內側
-                xPoints[1]                                // 頂部內側
-            },
-            new double[]{
-                HEIGHT,
-                TRACK_START_Y,
-                HEIGHT,
-                TRACK_START_Y
-            },
-            4
-        );
-        // 右側草地
-        gc.fillPolygon(
-            new double[]{
-                xPoints[3],                               // 底部內側
-                xPoints[2],                               // 頂部內側
-                xPoints[3] + GRASS_EXTRA_WIDTH,           // 底部外側
-                xPoints[2] + (GRASS_EXTRA_WIDTH * 0.3)    // 頂部外側（因透視效果縮小）
-            },
-            new double[]{
-                HEIGHT,
-                TRACK_START_Y,
-                HEIGHT,
-                TRACK_START_Y
-            },
-            4
-        );
+        gc.strokeLine(xPoints[0], TRACK_BOTTOM_Y, xPoints[1], TRACK_START_Y);
+        gc.strokeLine(xPoints[3], TRACK_BOTTOM_Y, xPoints[2], TRACK_START_Y);        
 
         // 修改樹和草叢的繪製位置
         drawSideElements(gc, new double[]{
@@ -160,5 +153,30 @@ public class RaceTrackCanvas extends Canvas {
         gc.setFill(Color.FORESTGREEN);
         gc.fillOval(x - crownSize/2 + trunkWidth/2, y - trunkHeight - crownSize/2, 
                    crownSize, crownSize);
+    }
+
+    private void drawClouds(GraphicsContext gc) {
+        gc.setFill(Color.WHITE);
+        double cloudOffset = (offset * 0.5) % WIDTH;
+        
+        // 第一朵雲
+        drawCloud(gc, -cloudOffset, HEIGHT * 0.1, 1.2);
+        drawCloud(gc, WIDTH * 0.5 - cloudOffset, HEIGHT * 0.05, 1);
+        drawCloud(gc, WIDTH - cloudOffset, HEIGHT * 0.15, 0.8);
+        
+        // 循環的雲
+        drawCloud(gc, WIDTH - cloudOffset + WIDTH, HEIGHT * 0.1, 1.2);
+        drawCloud(gc, WIDTH * 1.5 - cloudOffset, HEIGHT * 0.05, 1);
+        drawCloud(gc, WIDTH * 2 - cloudOffset, HEIGHT * 0.15, 0.8);
+    }
+
+    private void drawCloud(GraphicsContext gc, double x, double y, double scale) {
+        double baseSize = 30 * scale;
+        
+        // 繪製雲朵的圓形組合
+        gc.fillOval(x, y, baseSize, baseSize);
+        gc.fillOval(x + baseSize * 0.4, y - baseSize * 0.2, baseSize * 1.1, baseSize);
+        gc.fillOval(x + baseSize * 0.8, y, baseSize * 0.9, baseSize * 0.9);
+        gc.fillOval(x + baseSize * 0.3, y + baseSize * 0.2, baseSize, baseSize * 0.8);
     }
 }
