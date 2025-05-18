@@ -7,6 +7,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import game.UIUtils;
 
 public class MultiPlayerPage {
 
@@ -30,7 +31,7 @@ public class MultiPlayerPage {
         Label waitingLabel = new Label("正在等待其他玩家配對...");
         waitingLabel.setStyle("-fx-font-size: 32px; -fx-text-fill: #555;");
         Button cancelButton = new Button("取消");
-        cancelButton.setStyle("-fx-font-size: 20px; -fx-background-radius:50px;-fx-background-color: #FF5722; -fx-text-fill: white;");
+        UIUtils.applyCancelButton(cancelButton);
         cancelButton.setOnAction(event -> app.switchToHomePage());
 
         VBox waitingLayout = new VBox(30, waitingLabel, cancelButton);
@@ -44,6 +45,7 @@ public class MultiPlayerPage {
     public void showGameContent() {
         Label titleLabel = new Label("連線模式");
         Button backButton = new Button("返回首頁");
+        UIUtils.applySecondaryButton(backButton);
         backButton.setOnAction(event -> app.switchToHomePage());
 
         Label gameContent = new Label("連線遊戲內容將在此顯示...");
