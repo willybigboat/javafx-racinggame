@@ -37,7 +37,8 @@ public class HomePage {
         contentBox.setPadding(new Insets(50));
 
         StackPane root = new StackPane(canvas, contentBox);
-        root.setPrefSize(800, 600);
+        // 修正：使用統一的視窗大小常數
+        root.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
 
         return root;
     }

@@ -80,9 +80,9 @@ public class SinglePlayerPage {
             app.switchToHomePage();
         });
 
-        // 創建主要的 Pane
-        Pane root = new Pane();
-         root.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
+        // 創建主要的 StackPane 而不是 Pane，這樣可以更好地處理大小變化
+        StackPane root = new StackPane();
+        root.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
         
         // 綁定背景畫布的大小
         backgroundCanvas = new RaceTrackCanvas(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
@@ -93,6 +93,13 @@ public class SinglePlayerPage {
         gamePane = new Pane();
         gamePane.prefWidthProperty().bind(root.widthProperty());
         gamePane.prefHeightProperty().bind(root.heightProperty());
+        
+        // 監聽寬度變化，自動重新置中
+        gamePane.widthProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal.doubleValue() > 0) {
+                updatePlayerPosition();
+            }
+        });
 
         // 玩家位置綁定
         player = new Rectangle(40, 60, Color.BLUE);
@@ -127,6 +134,9 @@ public class SinglePlayerPage {
 
         root.getChildren().add(uiBox);
         root.getChildren().addAll(backgroundCanvas, gamePane);
+
+        // 初始化玩家位置
+        updatePlayerPosition();
 
         return root;
     }
@@ -167,7 +177,13 @@ public class SinglePlayerPage {
     }
 
     private void updatePlayerPosition() {
-        double centerOffset = (gamePane.getWidth() - laneWidth * lanes) / 2.0;
+        double paneWidth = gamePane.getWidth();
+        // 如果 pane 寬度還沒設定，使用預設寬度
+        if (paneWidth <= 0) {
+            paneWidth = App.WINDOW_WIDTH;
+        }
+        
+        double centerOffset = (paneWidth - laneWidth * lanes) / 2.0;
         double playerX = currentLane * laneWidth + centerOffset + (laneWidth - 40) / 2.0;
         player.setLayoutX(playerX);
     }

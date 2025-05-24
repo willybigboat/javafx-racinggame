@@ -44,12 +44,22 @@ public class App extends Application {
 
     // 切換到單人模式頁面
     public void switchToSinglePlayer() {
-        singlePlayerScene = new Scene(singlePlayerPage.createContent());
+        // 保存當前是否全螢幕
+        boolean wasFullScreen = primaryStage.isFullScreen();
+        
+        // 重新建立 SinglePlayerPage 內容
+        singlePlayerScene = new Scene(singlePlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // 在場景層級也添加鍵盤事件處理
         singlePlayerScene.setOnKeyPressed(event -> singlePlayerPage.handleKeyPress(event));
 
+        // 切換場景
         primaryStage.setScene(singlePlayerScene);
+        
+        // 恢復全螢幕狀態
+        if (wasFullScreen) {
+            primaryStage.setFullScreen(true);
+        }
 
         // 在場景切換完成後啟動遊戲
         singlePlayerPage.startGame();
