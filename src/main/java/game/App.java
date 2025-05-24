@@ -14,6 +14,7 @@ public class App extends Application {
     private Scene homeScene, singlePlayerScene, multiPlayerScene, gameOverScene;
     private GameOverPage gameOverPage;
     private SinglePlayerPage singlePlayerPage;
+    private MultiPlayerPage multiPlayerPage;
 
     @Override
     public void start(Stage primaryStage) {
@@ -27,7 +28,7 @@ public class App extends Application {
         // 建立各個頁面的實例
         HomePage homePage = new HomePage(this);
         singlePlayerPage = new SinglePlayerPage(this);
-        MultiPlayerPage multiPlayerPage = new MultiPlayerPage(this);
+        multiPlayerPage = new MultiPlayerPage(this);
         gameOverPage = new GameOverPage(this);
 
         // 建立場景並使用統一大小
@@ -42,7 +43,7 @@ public class App extends Application {
     }
 
     // 切換到單人模式頁面
-    public void switchToSinglePlayer() {        
+    public void switchToSinglePlayer() {
         singlePlayerScene = new Scene(singlePlayerPage.createContent());
 
         // 在場景層級也添加鍵盤事件處理
@@ -56,7 +57,14 @@ public class App extends Application {
 
     // 切換到連線模式頁面
     public void switchToMultiPlayer() {
+        multiPlayerScene = new Scene(multiPlayerPage.createContent());
+        // 在切換到多人遊戲頁面時添加按鍵事件監聽
+        multiPlayerScene.setOnKeyPressed(event -> multiPlayerPage.handleKeyPress(event));
+
         primaryStage.setScene(multiPlayerScene);
+
+        // 在場景切換完成後啟動遊戲
+        singlePlayerPage.startGame();
     }
 
     // 切換到遊戲結束頁面
