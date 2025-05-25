@@ -16,6 +16,8 @@ import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Text;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.*;
 
 import game.NetworkManager.GameState;
@@ -63,6 +65,12 @@ public class MultiPlayerPage {
     private NetworkManager networkManager = new NetworkManager();
     private boolean isHost;
 
+    // 新增網路同步相關變數
+    private long lastNetworkSync = 0;
+    private static final long NETWORK_SYNC_INTERVAL = 16; // ms
+    private static final long NETWORK_TIMEOUT = 5000; // 5秒逾時
+    private long lastReceivedTime = System.currentTimeMillis();
+
     public MultiPlayerPage(App app) {
         this.app = app;
     }
@@ -85,21 +93,34 @@ public class MultiPlayerPage {
         TextField ipField = new TextField();
         ipField.setPromptText("輸入主機IP");
 
+        // 新增返回首頁按鈕
+        Button backButton = new Button("返回首頁");
+        backButton.setOnAction(e -> app.switchToHomePage());
+
         hostButton.setOnAction(e -> {
-            try {
-                networkManager.createHost(12345);
-                showGameContent(true);
-            } catch (IOException ex) {
-                showError("建立遊戲失敗");
-            }
+            new Thread(() -> {
+                try {
+                    networkManager.createHost(12345);
+                    // UI 更新必須在 JavaFX 執行緒
+                    Platform.runLater(() -> showGameContent(true));
+                } catch (IOException ex) {
+                    Platform.runLater(() -> showError("建立遊戲失敗"));
+                }
+            }).start();
         });
 
+        // 驗證 IP 地址
         joinButton.setOnAction(e -> {
-            try {
-                networkManager.joinGame(ipField.getText(), 12345);
-                showGameContent(false);
-            } catch (IOException ex) {
-                showError("加入遊戲失敗");
+            String ipAddress = ipField.getText();
+            if (validateIP(ipAddress)) {
+                try {
+                    networkManager.joinGame(ipAddress, 12345);
+                    showGameContent(false);
+                } catch (IOException ex) {
+                    showError("加入遊戲失敗: " + ex.getMessage());
+                }
+            } else {
+                showError("IP 地址格式無效");
             }
         });
 
@@ -107,10 +128,25 @@ public class MultiPlayerPage {
                 new Label("多人遊戲"),
                 hostButton,
                 ipField,
-                joinButton
-        );
+                joinButton,
+                backButton);
 
         rootPane.getChildren().setAll(waitingLayout);
+
+        showHostIPAddress(waitingLayout); // 顯示主機 IP 地址
+    }
+
+    // 顯示主機 IP 位址
+    private void showHostIPAddress(VBox waitingLayout) {
+        try {
+            String hostIP = InetAddress.getLocalHost().getHostAddress();
+            Text ipText = new Text("你的 IP 地址: " + hostIP);
+            ipText.setStyle("-fx-fill: red; -fx-font-size: 16px;");
+            // 添加到待機畫面
+            waitingLayout.getChildren().add(ipText);
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        }
     }
 
     // 配對完成後呼叫此方法顯示遊戲內容
@@ -191,50 +227,39 @@ public class MultiPlayerPage {
         new Thread(() -> {
             while (!gameOver) {
                 try {
-                    // 傳送本地狀態
-                    GameState localState = new GameState();
-                    localState.playerLane = currentLane;
-                    localState.score = score;
-                    localState.lives = lives;
-                    localState.obstacles = isHost ? obstacles : null; // 只有主機傳送障礙物
-                    networkManager.sendGameState(localState);
+                    long now = System.currentTimeMillis();
 
-                    // 接收遠端狀態
-                    GameState remoteState = networkManager.receiveGameState();
-                    Platform.runLater(() -> {
-                        player2Lane = remoteState.playerLane;
-                        player2Score = remoteState.score;
-                        player2Lives = remoteState.lives;
-                        if (!isHost && remoteState.obstacles != null) {
-                            // 客戶端同步主機的障礙物
-                            syncObstacles(remoteState.obstacles);
-                        }
-                        updatePlayer2Position();
-                        updatePlayer2Score();
-                    });
+                    // 控制同步頻率
+                    if (now - lastNetworkSync >= NETWORK_SYNC_INTERVAL) {
+                        sendGameState();
+                        receiveGameState();
+                        lastNetworkSync = now;
+                    }
 
-                    Thread.sleep(16);
+                    // 檢查是否長時間沒收到對方資訊
+                    if (now - lastReceivedTime > NETWORK_TIMEOUT) {
+                        throw new IOException("連線逾時");
+                    }
+
+                    Thread.sleep(5); // 釋放CPU
                 } catch (Exception e) {
                     handleNetworkError();
-                    break; // 發生錯誤時退出迴圈
+                    break;
                 }
             }
         }).start();
     }
 
     // 新增障礙物同步方法
-    private void syncObstacles(ArrayList<Rectangle> hostObstacles) {
+    private void syncObstacles(ArrayList<NetworkManager.SerializableObstacle> hostObstacles) {
         // 清除舊的障礙物
         for (Rectangle obs : obstacles) {
             gamePane.getChildren().remove(obs);
         }
         obstacles.clear();
-        
-        // 同步新的障礙物
-        for (Rectangle hostObs : hostObstacles) {
-            Rectangle newObs = new Rectangle(40, 40, Color.RED);
-            newObs.setLayoutX(hostObs.getLayoutX());
-            newObs.setLayoutY(hostObs.getLayoutY());
+
+        for (NetworkManager.SerializableObstacle so : hostObstacles) {
+            Rectangle newObs = so.toRectangle();
             obstacles.add(newObs);
             gamePane.getChildren().add(newObs);
         }
@@ -244,26 +269,44 @@ public class MultiPlayerPage {
     private void startGame() {
         Text countdownText = new Text();
         countdownText.setStyle("-fx-font-size: 48px;");
-        countdownText.layoutXProperty().bind(
-            gamePane.widthProperty().divide(2).subtract(50)
-        );
-        countdownText.layoutYProperty().bind(
-            gamePane.heightProperty().divide(2)
-        );
+        countdownText.layoutXProperty().bind(gamePane.widthProperty().divide(2).subtract(50));
+        countdownText.layoutYProperty().bind(gamePane.heightProperty().divide(2));
         gamePane.getChildren().add(countdownText);
 
+        // 雙方確認準備好
         if (isHost) {
-            // 主機發送開始信號
             try {
-                GameState startSignal = new GameState();
-                startSignal.gameStarting = true;  // 需要在 GameState 類別中添加此欄位
-                networkManager.sendGameState(startSignal);
-            } catch (IOException e) {
+                // 主機等待客戶端準備好
+                GameState clientState = networkManager.receiveGameState();
+                if (clientState.isReady) {
+                    // 發送開始倒計時信號
+                    GameState startSignal = new GameState();
+                    startSignal.gameStarting = true;
+                    networkManager.sendGameState(startSignal);
+                    startCountdown(countdownText);
+                }
+            } catch (Exception e) {
                 handleNetworkError();
-                return;
+            }
+        } else {
+            try {
+                // 客戶端發送準備好信號
+                GameState readySignal = new GameState();
+                readySignal.isReady = true;
+                networkManager.sendGameState(readySignal);
+
+                // 等待主機開始信號
+                GameState hostState = networkManager.receiveGameState();
+                if (hostState.gameStarting) {
+                    startCountdown(countdownText);
+                }
+            } catch (Exception e) {
+                handleNetworkError();
             }
         }
+    }
 
+    private void startCountdown(Text countdownText) {
         // 開始倒數
         new Thread(() -> {
             try {
@@ -276,7 +319,7 @@ public class MultiPlayerPage {
                     countdownText.setText("開始！");
                     gamePane.getChildren().remove(countdownText);
                     startGameLoop();
-                    startNetworkSync();  // 移到這裡開始網路同步
+                    startNetworkSync(); // 移到這裡開始網路同步
                 });
                 Thread.sleep(1000);
                 Platform.runLater(() -> gamePane.getChildren().remove(countdownText));
@@ -347,7 +390,8 @@ public class MultiPlayerPage {
 
     // 修改障礙物生成邏輯，只由主機生成
     private void generateObstacles() {
-        if (!isHost) return; // 只有主機生成障礙物
+        if (!isHost)
+            return; // 只有主機生成障礙物
 
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastObstacleTime < 1000) {
@@ -468,7 +512,7 @@ public class MultiPlayerPage {
         // 顯示遊戲結束訊息
         Text gameOverText = new Text();
         gameOverText.setStyle("-fx-font-size: 24px;");
-        
+
         // 判斷勝負
         String message;
         if (score > player2Score) {
@@ -478,15 +522,13 @@ public class MultiPlayerPage {
         } else {
             message = "平手! 分數: " + score;
         }
-        
+
         gameOverText.setText(message);
         gameOverText.layoutXProperty().bind(
-            gamePane.widthProperty().divide(2).subtract(100)
-        );
+                gamePane.widthProperty().divide(2).subtract(100));
         gameOverText.layoutYProperty().bind(
-            gamePane.heightProperty().divide(2)
-        );
-        
+                gamePane.heightProperty().divide(2));
+
         gamePane.getChildren().add(gameOverText);
 
         // 關閉網路連線
@@ -534,28 +576,92 @@ public class MultiPlayerPage {
     private void showReadyScreen() {
         VBox readyBox = new VBox(20);
         readyBox.setAlignment(Pos.CENTER);
-        
+
         Text waitingText = new Text(isHost ? "等待玩家加入..." : "等待主機開始...");
         waitingText.setStyle("-fx-font-size: 24px;");
-        
+
         Button readyButton = new Button("準備開始");
         readyButton.setVisible(isHost);
-        
+
         readyButton.setOnAction(e -> {
             readyBox.getChildren().clear();
             startGame();
         });
-        
+
         readyBox.getChildren().addAll(waitingText, readyButton);
         readyBox.layoutXProperty().bind(
-            gamePane.widthProperty().divide(2).subtract(100)
-        );
+                gamePane.widthProperty().divide(2).subtract(100));
         readyBox.layoutYProperty().bind(
-            gamePane.heightProperty().divide(2)
-        );
-        
+                gamePane.heightProperty().divide(2));
+
         gamePane.getChildren().add(readyBox);
     }
+
+    // 修改障礙物發送邏輯
+    private void sendGameState() {
+        try {
+            GameState localState = new GameState();
+            localState.playerLane = currentLane;
+            localState.score = score;
+            localState.lives = lives;
+
+            // 轉換障礙物為可序列化格式
+            if (isHost && !obstacles.isEmpty()) {
+                ArrayList<NetworkManager.SerializableObstacle> serializableObstacles = new ArrayList<>();
+                for (Rectangle obs : obstacles) {
+                    serializableObstacles.add(new NetworkManager.SerializableObstacle(obs));
+                }
+                localState.obstacles = serializableObstacles;
+            }
+
+            networkManager.sendGameState(localState);
+        } catch (IOException e) {
+            handleNetworkError();
+        }
+    }
+
+    // 修改障礙物接收邏輯
+    private void receiveGameState() {
+        try {
+            GameState remoteState = networkManager.receiveGameState();
+
+            // 更新玩家狀態
+            if (remoteState.playerLane != currentLane) {
+                currentLane = remoteState.playerLane;
+                updatePlayerPosition();
+            }
+            score = remoteState.score;
+            lives = remoteState.lives;
+
+            // 同步障礙物
+            if (isHost) {
+                syncObstacles(remoteState.obstacles);
+            } else {
+                if (remoteState.obstacles != null) {
+                    obstacles.clear();
+                    for (NetworkManager.SerializableObstacle so : remoteState.obstacles) {
+                        Rectangle obs = so.toRectangle();
+                        obstacles.add(obs);
+                        gamePane.getChildren().add(obs);
+                    }
+                }
+            }
+
+            // 更新分數和生命顯示
+            scoreText.setText("Score: " + score);
+            lifeText.setText("Lives: " + lives);
+            player2ScoreText.setText("Player 2 Score: " + player2Score);
+            player2LifeText.setText("Player 2 Lives: " + player2Lives);
+
+            lastReceivedTime = System.currentTimeMillis();
+        } catch (IOException | ClassNotFoundException e) {
+            handleNetworkError();
+        }
+    }
+
+    // 驗證 IP 地址
+    private boolean validateIP(String ip) {
+        String pattern = "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$";
+        return ip.matches(pattern);
+    }
 }
-
-

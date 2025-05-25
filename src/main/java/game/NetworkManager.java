@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 
+import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 
 public class NetworkManager {
@@ -12,13 +13,38 @@ public class NetworkManager {
     private ObjectInputStream in;
     private boolean isHost;
     
+    // 可序列化的障礙物類別
+    public static class SerializableObstacle implements Serializable {
+        public double x;
+        public double y;
+        public double width;
+        public double height;
+        
+        // 由 Rectangle 建立
+        public SerializableObstacle(Rectangle rect) {
+            this.x = rect.getLayoutX();
+            this.y = rect.getLayoutY();
+            this.width = rect.getWidth();
+            this.height = rect.getHeight();
+        }
+        
+        // 轉換回 Rectangle
+        public Rectangle toRectangle() {
+            Rectangle rect = new Rectangle(width, height, Color.RED);
+            rect.setLayoutX(x);
+            rect.setLayoutY(y);
+            return rect;
+        }
+    }
+    
     // 遊戲狀態同步用的資料類別
     public static class GameState implements Serializable {
         public int playerLane;
         public int score;
         public int lives;
-        public ArrayList<Rectangle> obstacles;
+        public ArrayList<SerializableObstacle> obstacles;
         public boolean gameStarting;  // 新增此欄位
+        public boolean isReady;
     }
     
     // 建立主機
