@@ -77,6 +77,17 @@ public class App extends Application {
         singlePlayerPage.startGame();
     }
 
+    //直接接到連線畫面(開發用)
+    public void switchToMultiPlayerWaitingPage() {
+    if (multiPlayerPage == null) {
+        multiPlayerPage = new MultiPlayerPage(this);
+    }
+    Scene scene = new Scene(multiPlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
+    primaryStage.setScene(scene);
+    // 進入等待頁面
+    multiPlayerPage.showWaitingPage();
+}
+
     // 切換到遊戲結束頁面
     public void switchToGameOver() {
         gameOverPage.setScores(singlePlayerPage.getScore(), singlePlayerPage.getHighScore());

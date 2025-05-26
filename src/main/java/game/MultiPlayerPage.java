@@ -79,12 +79,13 @@ public class MultiPlayerPage {
     public Parent createContent() {
         rootPane = new StackPane();
         rootPane.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
-        showWaitingPage();
+        //showWaitingPage();
+        showGameContent(true); // 直接顯示遊戲中畫面
         return rootPane;
     }
 
     // 顯示等待配對頁面
-    private void showWaitingPage() {
+    public void showWaitingPage() {
         VBox waitingLayout = new VBox(20);
         waitingLayout.setAlignment(Pos.CENTER);
 

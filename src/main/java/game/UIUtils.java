@@ -43,6 +43,18 @@ public class UIUtils {
     }
 
     /**
+     * 套用標準副按鈕樣式(主頁:等待頁面)
+     */
+    public static void applywaitpageButton(Button button) {
+        String style = "-fx-font-size: 40px;"
+                + "-fx-background-radius: 50px;"
+                + "-fx-background-color: linear-gradient(to bottom, #2196F3, #6DD5FA);"
+                + "-fx-text-fill: white;"
+                + "-fx-effect: dropshadow(gaussian, #222, 8, 0.5, 0, 2);";
+        applyButtonStyle(button, style);
+    }
+
+    /**
      * 套用取消按鈕樣式（多人）
      */
     public static void applyCancelButton(Button button) {

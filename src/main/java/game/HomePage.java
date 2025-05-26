@@ -32,7 +32,11 @@ public class HomePage {
         UIUtils.applySecondaryButton(multiPlayerButton);
         multiPlayerButton.setOnAction(event -> app.switchToMultiPlayer());
 
-        VBox contentBox = new VBox(30, titleLabel, singlePlayerButton, multiPlayerButton);
+        Button waitpageButton = new Button("等待頁面");
+        UIUtils.applywaitpageButton(waitpageButton);
+        waitpageButton.setOnAction(event -> app.switchToMultiPlayerWaitingPage());
+
+        VBox contentBox = new VBox(30, titleLabel, singlePlayerButton, multiPlayerButton, waitpageButton);
         contentBox.setAlignment(Pos.CENTER);
         contentBox.setPadding(new Insets(50));
 
