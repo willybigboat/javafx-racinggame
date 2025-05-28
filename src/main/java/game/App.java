@@ -74,7 +74,7 @@ public class App extends Application {
         primaryStage.setScene(multiPlayerScene);
 
         // 在場景切換完成後啟動遊戲
-        singlePlayerPage.startGame();
+        //singlePlayerPage.startGame();
     }
 
     //直接接到連線畫面(開發用)

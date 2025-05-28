@@ -79,8 +79,8 @@ public class MultiPlayerPage {
     public Parent createContent() {
         rootPane = new StackPane();
         rootPane.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
-        //showWaitingPage();
-        showGameContent(true); // 直接顯示遊戲中畫面
+        //showWaitingPage(); 開發完取消註解 !!!
+        showGameContent(true); // 直接顯示遊戲中畫面(開發用)
         return rootPane;
     }
 
