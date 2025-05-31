@@ -4,18 +4,18 @@ import javafx.animation.AnimationTimer;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
-import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.CycleMethod;
+import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.Stop;
 
 public class RaceTrackCanvas extends Canvas {
 
-    private static final double WIDTH = 600;
+    private static final double WIDTH = 1200;
     private static final double HEIGHT = 800;
     private static final int LANES = 4;
 
     // 修改賽道透視參數
-    private static final double TRACK_START_Y = HEIGHT * 0.44; // 調整起始位置更靠上
+    private static final double TRACK_START_Y = HEIGHT * 0.3; // 調整起始位置更靠上
     private static final double TRACK_BOTTOM_Y = HEIGHT; // 調整底部位置
     private static final double TRACK_BOTTOM_WIDTH = 400;
     private static final double TRACK_TOP_WIDTH = 200;

@@ -7,7 +7,7 @@ import javafx.stage.Stage;
 public class App extends Application {
 
     // 定義統一的視窗大小常數
-    public static final double WINDOW_WIDTH = 600;
+    public static final double WINDOW_WIDTH = 1200;
     public static final double WINDOW_HEIGHT = 800;
 
     private Stage primaryStage;
@@ -19,7 +19,6 @@ public class App extends Application {
     @Override
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
-        primaryStage.setTitle("賽車遊戲");
 
         // 設定視窗最小大小
         primaryStage.setMinWidth(WINDOW_WIDTH);
@@ -44,12 +43,22 @@ public class App extends Application {
 
     // 切換到單人模式頁面
     public void switchToSinglePlayer() {
-        singlePlayerScene = new Scene(singlePlayerPage.createContent());
+        // 保存當前是否全螢幕
+        boolean wasFullScreen = primaryStage.isFullScreen();
+        
+        // 重新建立 SinglePlayerPage 內容
+        singlePlayerScene = new Scene(singlePlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // 在場景層級也添加鍵盤事件處理
         singlePlayerScene.setOnKeyPressed(event -> singlePlayerPage.handleKeyPress(event));
 
+        // 切換場景
         primaryStage.setScene(singlePlayerScene);
+        
+        // 恢復全螢幕狀態
+        if (wasFullScreen) {
+            primaryStage.setFullScreen(true);
+        }
 
         // 在場景切換完成後啟動遊戲
         singlePlayerPage.startGame();
@@ -64,8 +73,19 @@ public class App extends Application {
         primaryStage.setScene(multiPlayerScene);
 
         // 在場景切換完成後啟動遊戲
-        singlePlayerPage.startGame();
+        //singlePlayerPage.startGame();
     }
+
+    //直接接到連線畫面(開發用)
+    public void switchToMultiPlayerWaitingPage() {
+    if (multiPlayerPage == null) {
+        multiPlayerPage = new MultiPlayerPage(this);
+    }
+    Scene scene = new Scene(multiPlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
+    primaryStage.setScene(scene);
+    // 進入等待頁面
+    multiPlayerPage.showWaitingPage();
+}
 
     // 切換到遊戲結束頁面
     public void switchToGameOver() {

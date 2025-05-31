@@ -4,6 +4,9 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 
 public class NetworkManager {
@@ -12,13 +15,45 @@ public class NetworkManager {
     private ObjectInputStream in;
     private boolean isHost;
     
+    // 可序列化的障礙物類別
+    public static class SerializableObstacle implements Serializable {
+        public double x;
+        public double y;
+        public double width;
+        public double height;
+        public String imagePath; // 新增圖片路徑欄位
+        
+        
+        // 由 ImageView 建立
+        public SerializableObstacle(ImageView obs) {
+            this.imagePath = (String) obs.getUserData(); // 取得圖片路徑
+            this.width = obs.getFitWidth();
+            this.height = obs.getFitHeight();
+            this.x = obs.getLayoutX();
+            this.y = obs.getLayoutY();
+        }            
+        
+        public ImageView toImageView() {
+            // 需要正確還原圖片路徑與位置
+            Image img = new Image(getClass().getResourceAsStream(this.imagePath));
+            ImageView view = new ImageView(img);
+            view.setFitWidth(this.width);
+            view.setFitHeight(this.height);
+            view.setLayoutX(this.x);
+            view.setLayoutY(this.y);
+            view.setUserData(this.imagePath); // 保持一致
+            return view;
+        }
+    }
+    
     // 遊戲狀態同步用的資料類別
     public static class GameState implements Serializable {
         public int playerLane;
         public int score;
         public int lives;
-        public ArrayList<Rectangle> obstacles;
+        public ArrayList<SerializableObstacle> obstacles;
         public boolean gameStarting;  // 新增此欄位
+        public boolean isReady;
     }
     
     // 建立主機

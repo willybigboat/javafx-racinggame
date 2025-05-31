@@ -1,26 +1,33 @@
 package game;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.Random;
+
+import game.NetworkManager.GameState;
 import javafx.animation.AnimationTimer;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Text;
-
-import java.io.IOException;
-import java.util.*;
-
-import game.NetworkManager.GameState;
-import javafx.application.Platform;
-import javafx.scene.control.Alert;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 
 public class MultiPlayerPage {
 
@@ -28,8 +35,8 @@ public class MultiPlayerPage {
     private StackPane rootPane;
 
     // 新增遊戲相關變數
-    private Rectangle player;
-    private ArrayList<Rectangle> obstacles = new ArrayList<>();
+    private ImageView player;
+    private ArrayList<ImageView> obstacles = new ArrayList<>();
     private int currentLane = 1;
     private final int lanes = 4;
     private final int laneWidth = 70;
@@ -54,7 +61,7 @@ public class MultiPlayerPage {
     private int highScore = 0;
 
     // 新增玩家2的變數
-    private Rectangle player2;
+    private ImageView player2;
     private int player2Lane = 1;
     private int player2Score = 0;
     private int player2Lives = 3;
@@ -62,6 +69,22 @@ public class MultiPlayerPage {
 
     private NetworkManager networkManager = new NetworkManager();
     private boolean isHost;
+
+    // 新增網路同步相關變數
+    private long lastNetworkSync = 0;
+    private static final long NETWORK_SYNC_INTERVAL = 16; // ms
+    private static final long NETWORK_TIMEOUT = 5000; // 5秒逾時
+    private long lastReceivedTime = System.currentTimeMillis();
+
+    private static final String PLAYER1_IMAGE = "/image/redCar.png";
+    private static final String PLAYER2_IMAGE = "/image/blueCar.png";
+    private static final String[] OBSTACLE_IMAGES = {
+        "/image/bananaPeel.png",
+        "/image/can.png",
+        "/image/garbage.png",
+        "/image/redBlock.png",
+        "/image/yellowBlock.png"
+    };
 
     public MultiPlayerPage(App app) {
         this.app = app;
@@ -71,52 +94,115 @@ public class MultiPlayerPage {
     public Parent createContent() {
         rootPane = new StackPane();
         rootPane.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
-        showWaitingPage();
+        gamePane = new Pane();
+        gamePane.setPrefSize(WIDTH, HEIGHT);
+        //showWaitingPage(); 開發完取消註解 !!!
+        showGameContent(true); // 直接顯示遊戲中畫面(開發用)
         return rootPane;
     }
 
     // 顯示等待配對頁面
-    private void showWaitingPage() {
+    public void showWaitingPage() {
+        StackPane root = new StackPane();
+        root.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
+        
+        // 綁定背景畫布的大小
+        backgroundCanvas = new RaceTrackCanvas(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
+        backgroundCanvas.widthProperty().bind(root.widthProperty());
+        backgroundCanvas.heightProperty().bind(root.heightProperty());
+        
         VBox waitingLayout = new VBox(20);
+        waitingLayout.setMinWidth(App.WINDOW_WIDTH/2);
+        waitingLayout.setMaxWidth(App.WINDOW_WIDTH/2);
+        waitingLayout.setMinHeight(App.WINDOW_HEIGHT/2.5);
+        waitingLayout.setMaxHeight(App.WINDOW_HEIGHT/2.5);
         waitingLayout.setAlignment(Pos.CENTER);
+        waitingLayout.setPrefSize(App.WINDOW_WIDTH/2, App.WINDOW_HEIGHT/2.5);
+        waitingLayout.setStyle("-fx-background-color: rgba(255, 255, 255, 0.7); -fx-padding: 20px; -fx-border-radius: 10px; -fx-background-radius: 10px;");
 
+        HBox btHbox = new HBox(50);
+        btHbox.setAlignment(Pos.BOTTOM_CENTER);
+        VBox joinLayout = new VBox(20);
+        joinLayout.setAlignment(Pos.CENTER);
+
+        // 添加內容    
         Button hostButton = new Button("建立遊戲");
+        UIUtils.applywaitButton(hostButton);
         Button joinButton = new Button("加入遊戲");
+        UIUtils.applywaitButton(joinButton);
         TextField ipField = new TextField();
+        ipField.setMinWidth(150);
+        ipField.setMaxWidth(150);
+        ipField.setPrefWidth(150);
         ipField.setPromptText("輸入主機IP");
 
+        // 新增返回首頁按鈕
+        Button backButton = new Button("返回首頁");
+        UIUtils.applybackButton(backButton);
+        backButton.setOnAction(e -> app.switchToHomePage());
+
         hostButton.setOnAction(e -> {
-            try {
-                networkManager.createHost(12345);
-                showGameContent(true);
-            } catch (IOException ex) {
-                showError("建立遊戲失敗");
-            }
+            new Thread(() -> {
+                try {
+                    networkManager.createHost(12345);
+                    // UI 更新必須在 JavaFX 執行緒
+                    Platform.runLater(() -> showGameContent(true));
+                } catch (IOException ex) {
+                    Platform.runLater(() -> showError("建立遊戲失敗"));
+                }
+            }).start();
         });
 
+        // 驗證 IP 地址
         joinButton.setOnAction(e -> {
-            try {
-                networkManager.joinGame(ipField.getText(), 12345);
-                showGameContent(false);
-            } catch (IOException ex) {
-                showError("加入遊戲失敗");
+            String ipAddress = ipField.getText();
+            if (validateIP(ipAddress)) {
+                try {
+                    networkManager.joinGame(ipAddress, 12345);
+                    showGameContent(false);
+                } catch (IOException ex) {
+                    showError("加入遊戲失敗: " + ex.getMessage());
+                }
+            } else {
+                showError("IP 地址格式無效");
             }
         });
+        joinLayout.getChildren().addAll(ipField, joinButton);
+        btHbox.getChildren().addAll(hostButton, joinLayout);
 
         waitingLayout.getChildren().addAll(
-                new Label("多人遊戲"),
-                hostButton,
-                ipField,
-                joinButton
+                btHbox,
+                backButton
         );
 
-        rootPane.getChildren().setAll(waitingLayout);
+        // 將背景和內容添加到根容器
+        root.getChildren().addAll(backgroundCanvas, waitingLayout);
+
+        // 設置等待框框的位置
+        StackPane.setAlignment(waitingLayout, Pos.CENTER);
+
+        rootPane.getChildren().setAll(root);
+
+        // 顯示主機 IP 地址
+        showHostIPAddress(waitingLayout);
+    }
+
+    // 顯示主機 IP 位址
+    private void showHostIPAddress(VBox waitingLayout) {
+        try {
+            String hostIP = InetAddress.getLocalHost().getHostAddress();
+            Text ipText = new Text("你的 IP 地址: " + hostIP);
+            ipText.setStyle("-fx-fill: red; -fx-font-size: 16px; -fx-font-weight: bold;");
+            // 添加到待機畫面
+            waitingLayout.getChildren().add(ipText);
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        }
     }
 
     // 配對完成後呼叫此方法顯示遊戲內容
     public void showGameContent(boolean isHost) {
         this.isHost = isHost;
-        // 初始化遊戲狀態
         gameOver = false;
         speed = 10;
         score = 0;
@@ -125,116 +211,106 @@ public class MultiPlayerPage {
         lastUsedLane = -1;
         obstacles.clear();
 
-        // 創建遊戲畫面
-        Pane root = new Pane();
-        root.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
+        // 創建主畫面容器
+        HBox root = new HBox(5);
+        root.setPrefSize(App.WINDOW_WIDTH*2, App.WINDOW_HEIGHT);
 
-        // 初始化背景
-        backgroundCanvas = new RaceTrackCanvas(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
-        backgroundCanvas.widthProperty().bind(root.widthProperty());
-        backgroundCanvas.heightProperty().bind(root.heightProperty());
+        // 玩家1的遊戲畫面
+        Pane player1Pane = createPlayerPane("玩家1", PLAYER1_IMAGE, true);
+        // 玩家2的遊戲畫面
+        Pane player2Pane = createPlayerPane("玩家2", PLAYER2_IMAGE, false);
 
-        // 初始化遊戲層
-        gamePane = new Pane();
-        gamePane.prefWidthProperty().bind(root.widthProperty());
-        gamePane.prefHeightProperty().bind(root.heightProperty());
-
-        // 創建玩家
-        player = new Rectangle(40, 60, Color.BLUE);
-        player.layoutYProperty().bind(root.heightProperty().multiply(0.7));
-
-        // 創建分數和生命值顯示
-        scoreText = new Text("Score: 0");
-        scoreText.layoutXProperty().bind(root.widthProperty().multiply(0.05));
-        scoreText.layoutYProperty().bind(root.heightProperty().multiply(0.05));
-
-        lifeText = new Text("Lives: 3");
-        lifeText.layoutXProperty().bind(root.widthProperty().multiply(0.05));
-        lifeText.layoutYProperty().bind(root.heightProperty().multiply(0.15));
-
-        // 返回按鈕
-        Button backButton = new Button("返回首頁");
-        UIUtils.applySecondaryButton(backButton);
-        backButton.setOnAction(event -> {
-            if (timer != null) {
-                timer.stop();
-            }
-            app.switchToHomePage();
-        });
-
-        gamePane.getChildren().addAll(player, scoreText, lifeText, backButton);
-        root.getChildren().addAll(backgroundCanvas, gamePane);
+        // 將兩個遊戲畫面加入主畫面
+        root.getChildren().addAll(player1Pane, player2Pane);
 
         rootPane.getChildren().setAll(root);
 
-        // 創建第二位玩家
-        player2 = new Rectangle(40, 60, Color.GREEN);
-        player2.layoutYProperty().bind(root.heightProperty().multiply(0.7));
-
-        // 創建玩家2的分數和生命值顯示
-        player2ScoreText = new Text("Player 2 Score: 0");
-        player2ScoreText.layoutXProperty().bind(root.widthProperty().multiply(0.75));
-        player2ScoreText.layoutYProperty().bind(root.heightProperty().multiply(0.05));
-
-        player2LifeText = new Text("Player 2 Lives: 3");
-        player2LifeText.layoutXProperty().bind(root.widthProperty().multiply(0.75));
-        player2LifeText.layoutYProperty().bind(root.heightProperty().multiply(0.15));
-
-        // 將玩家2加入遊戲畫面
-        gamePane.getChildren().addAll(player2, player2ScoreText, player2LifeText);
-
         // 顯示準備開始畫面
         showReadyScreen();
+    }
+
+    private Pane createPlayerPane(String playerName, String carImagePath, boolean isPlayer1) {
+        Pane playerPane = new Pane();
+        playerPane.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT / 2);
+
+        // 背景
+        RaceTrackCanvas backgroundCanvas = new RaceTrackCanvas(App.WINDOW_WIDTH/2, App.WINDOW_HEIGHT);
+        backgroundCanvas.widthProperty().bind(playerPane.widthProperty());
+        backgroundCanvas.heightProperty().bind(playerPane.heightProperty());
+
+        // 玩家（用圖片）
+        Image carImage = new Image(getClass().getResourceAsStream(carImagePath));
+        ImageView playerImg = new ImageView(carImage);
+        playerImg.setFitWidth(60);
+        playerImg.setFitHeight(90);
+        playerImg.setLayoutY(playerPane.getPrefHeight() * 0.7);
+
+        // 玩家資訊
+        Text playerText = new Text(playerName);
+        playerText.setStyle("-fx-font-size: 18px;");
+        Text scoreText = new Text(" Score: 0");
+        scoreText.setStyle("-fx-font-size: 16px;");
+        Text lifeText = new Text(" Lives: 3");
+        lifeText.setStyle("-fx-font-size: 16px;");
+
+        VBox infoBox = new VBox(8, playerText, scoreText, lifeText);
+        infoBox.setAlignment(Pos.TOP_LEFT);
+        infoBox.setPadding(new Insets(10));
+        infoBox.setStyle("-fx-background-color: rgba(255,255,255,0.7); -fx-background-radius: 10px;");
+        infoBox.setLayoutX(15);
+        infoBox.setLayoutY(15);
+
+        if (isPlayer1) {
+            this.player = playerImg;
+            this.scoreText = scoreText;
+            this.lifeText = lifeText;
+        } else {
+            this.player2 = playerImg;
+            this.player2ScoreText = scoreText;
+            this.player2LifeText = lifeText;
+        }
+
+        playerPane.getChildren().addAll(backgroundCanvas, playerImg, infoBox);
+        return playerPane;
     }
 
     private void startNetworkSync() {
         new Thread(() -> {
             while (!gameOver) {
                 try {
-                    // 傳送本地狀態
-                    GameState localState = new GameState();
-                    localState.playerLane = currentLane;
-                    localState.score = score;
-                    localState.lives = lives;
-                    localState.obstacles = isHost ? obstacles : null; // 只有主機傳送障礙物
-                    networkManager.sendGameState(localState);
+                    long now = System.currentTimeMillis();
 
-                    // 接收遠端狀態
-                    GameState remoteState = networkManager.receiveGameState();
-                    Platform.runLater(() -> {
-                        player2Lane = remoteState.playerLane;
-                        player2Score = remoteState.score;
-                        player2Lives = remoteState.lives;
-                        if (!isHost && remoteState.obstacles != null) {
-                            // 客戶端同步主機的障礙物
-                            syncObstacles(remoteState.obstacles);
-                        }
-                        updatePlayer2Position();
-                        updatePlayer2Score();
-                    });
+                    // 控制同步頻率
+                    if (now - lastNetworkSync >= NETWORK_SYNC_INTERVAL) {
+                        sendGameState();
+                        receiveGameState();
+                        lastNetworkSync = now;
+                    }
 
-                    Thread.sleep(16);
+                    // 檢查是否長時間沒收到對方資訊
+                    if (now - lastReceivedTime > NETWORK_TIMEOUT) {
+                        throw new IOException("連線逾時");
+                    }
+
+                    Thread.sleep(5); // 釋放CPU
                 } catch (Exception e) {
                     handleNetworkError();
-                    break; // 發生錯誤時退出迴圈
+                    break;
                 }
             }
         }).start();
     }
 
     // 新增障礙物同步方法
-    private void syncObstacles(ArrayList<Rectangle> hostObstacles) {
+    private void syncObstacles(ArrayList<NetworkManager.SerializableObstacle> hostObstacles) {
         // 清除舊的障礙物
-        for (Rectangle obs : obstacles) {
+        for (ImageView obs : obstacles) {
             gamePane.getChildren().remove(obs);
         }
         obstacles.clear();
-        
-        // 同步新的障礙物
-        for (Rectangle hostObs : hostObstacles) {
-            Rectangle newObs = new Rectangle(40, 40, Color.RED);
-            newObs.setLayoutX(hostObs.getLayoutX());
-            newObs.setLayoutY(hostObs.getLayoutY());
+
+        for (NetworkManager.SerializableObstacle so : hostObstacles) {
+            ImageView newObs = so.toImageView();
             obstacles.add(newObs);
             gamePane.getChildren().add(newObs);
         }
@@ -244,26 +320,44 @@ public class MultiPlayerPage {
     private void startGame() {
         Text countdownText = new Text();
         countdownText.setStyle("-fx-font-size: 48px;");
-        countdownText.layoutXProperty().bind(
-            gamePane.widthProperty().divide(2).subtract(50)
-        );
-        countdownText.layoutYProperty().bind(
-            gamePane.heightProperty().divide(2)
-        );
+        countdownText.layoutXProperty().bind(gamePane.widthProperty().divide(2).subtract(50));
+        countdownText.layoutYProperty().bind(gamePane.heightProperty().divide(2));
         gamePane.getChildren().add(countdownText);
 
+        // 雙方確認準備好
         if (isHost) {
-            // 主機發送開始信號
             try {
-                GameState startSignal = new GameState();
-                startSignal.gameStarting = true;  // 需要在 GameState 類別中添加此欄位
-                networkManager.sendGameState(startSignal);
-            } catch (IOException e) {
+                // 主機等待客戶端準備好
+                GameState clientState = networkManager.receiveGameState();
+                if (clientState.isReady) {
+                    // 發送開始倒計時信號
+                    GameState startSignal = new GameState();
+                    startSignal.gameStarting = true;
+                    networkManager.sendGameState(startSignal);
+                    startCountdown(countdownText);
+                }
+            } catch (Exception e) {
                 handleNetworkError();
-                return;
+            }
+        } else {
+            try {
+                // 客戶端發送準備好信號
+                GameState readySignal = new GameState();
+                readySignal.isReady = true;
+                networkManager.sendGameState(readySignal);
+
+                // 等待主機開始信號
+                GameState hostState = networkManager.receiveGameState();
+                if (hostState.gameStarting) {
+                    startCountdown(countdownText);
+                }
+            } catch (Exception e) {
+                handleNetworkError();
             }
         }
+    }
 
+    private void startCountdown(Text countdownText) {
         // 開始倒數
         new Thread(() -> {
             try {
@@ -276,7 +370,7 @@ public class MultiPlayerPage {
                     countdownText.setText("開始！");
                     gamePane.getChildren().remove(countdownText);
                     startGameLoop();
-                    startNetworkSync();  // 移到這裡開始網路同步
+                    startNetworkSync(); // 移到這裡開始網路同步
                 });
                 Thread.sleep(1000);
                 Platform.runLater(() -> gamePane.getChildren().remove(countdownText));
@@ -337,6 +431,14 @@ public class MultiPlayerPage {
             return;
         }
 
+        // 更新玩家1的畫面
+        updatePlayer1();
+        // 更新玩家2的畫面
+        updatePlayer2();
+    }
+
+    // 更新玩家1的畫面
+    private void updatePlayer1() {
         generateObstacles();
         moveObstacles();
         checkCollision();
@@ -345,9 +447,18 @@ public class MultiPlayerPage {
         scoreText.setText("Score: " + score);
     }
 
+    // 更新玩家2的畫面
+    private void updatePlayer2() {
+        // 玩家2的障礙物和分數由網路同步
+        updatePlayer2Position();
+        player2ScoreText.setText("Player 2 Score: " + player2Score);
+        player2LifeText.setText("Player 2 Lives: " + player2Lives);
+    }
+
     // 修改障礙物生成邏輯，只由主機生成
     private void generateObstacles() {
-        if (!isHost) return; // 只有主機生成障礙物
+        if (!isHost)
+            return; // 只有主機生成障礙物
 
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastObstacleTime < 1000) {
@@ -369,10 +480,17 @@ public class MultiPlayerPage {
                 continue;
             }
 
-            Rectangle obstacle = new Rectangle(40, 40, Color.RED);
-            double centerOffset = (gamePane.getWidth() - laneWidth * lanes) / 2.0;
-            double obstacleX = lane * laneWidth + centerOffset + (laneWidth - 40) / 2.0;
+             // 隨機選擇障礙物圖片
+            String imgPath = OBSTACLE_IMAGES[rand.nextInt(OBSTACLE_IMAGES.length)];
+            Image obsImg = new Image(getClass().getResourceAsStream(imgPath));
+            ImageView obstacle = new ImageView(obsImg);
+            obstacle.setFitWidth(60);
+            obstacle.setFitHeight(60);
+            obstacle.setUserData(imgPath); // 關鍵：記錄圖片路徑
 
+            double centerOffset = (gamePane.getWidth() - laneWidth * lanes) / 2.0;
+            double laneStartX = lane * laneWidth + centerOffset;
+            double obstacleX = laneStartX + (laneWidth - obstacle.getFitWidth()) / 2.0;
             obstacle.setLayoutX(obstacleX);
             obstacle.setLayoutY(0);
             obstacles.add(obstacle);
@@ -387,9 +505,9 @@ public class MultiPlayerPage {
     }
 
     private void moveObstacles() {
-        Iterator<Rectangle> iter = obstacles.iterator();
+        Iterator<ImageView> iter = obstacles.iterator();
         while (iter.hasNext()) {
-            Rectangle obs = iter.next();
+            ImageView obs = iter.next();
             obs.setLayoutY(obs.getLayoutY() + speed);
 
             if (obs.getLayoutY() > HEIGHT) {
@@ -406,9 +524,9 @@ public class MultiPlayerPage {
 
     // 修改碰撞檢查，包含兩位玩家
     private void checkCollision() {
-        Iterator<Rectangle> iter = obstacles.iterator();
+        Iterator<ImageView> iter = obstacles.iterator();
         while (iter.hasNext()) {
-            Rectangle obs = iter.next();
+            ImageView obs = iter.next();
 
             // 檢查玩家1碰撞
             if (player.getBoundsInParent().intersects(obs.getBoundsInParent())) {
@@ -423,7 +541,7 @@ public class MultiPlayerPage {
     }
 
     // 新增碰撞處理方法
-    private void handleCollision(Rectangle obs, Iterator<Rectangle> iter, boolean isPlayer1) {
+    private void handleCollision(ImageView obs, Iterator<ImageView> iter, boolean isPlayer1) {
         gamePane.getChildren().remove(obs);
         iter.remove();
 
@@ -468,7 +586,7 @@ public class MultiPlayerPage {
         // 顯示遊戲結束訊息
         Text gameOverText = new Text();
         gameOverText.setStyle("-fx-font-size: 24px;");
-        
+
         // 判斷勝負
         String message;
         if (score > player2Score) {
@@ -478,15 +596,13 @@ public class MultiPlayerPage {
         } else {
             message = "平手! 分數: " + score;
         }
-        
+
         gameOverText.setText(message);
         gameOverText.layoutXProperty().bind(
-            gamePane.widthProperty().divide(2).subtract(100)
-        );
+                gamePane.widthProperty().divide(2).subtract(100));
         gameOverText.layoutYProperty().bind(
-            gamePane.heightProperty().divide(2)
-        );
-        
+                gamePane.heightProperty().divide(2));
+
         gamePane.getChildren().add(gameOverText);
 
         // 關閉網路連線
@@ -534,28 +650,92 @@ public class MultiPlayerPage {
     private void showReadyScreen() {
         VBox readyBox = new VBox(20);
         readyBox.setAlignment(Pos.CENTER);
-        
+
         Text waitingText = new Text(isHost ? "等待玩家加入..." : "等待主機開始...");
         waitingText.setStyle("-fx-font-size: 24px;");
-        
+
         Button readyButton = new Button("準備開始");
         readyButton.setVisible(isHost);
-        
+
         readyButton.setOnAction(e -> {
             readyBox.getChildren().clear();
             startGame();
         });
-        
+
         readyBox.getChildren().addAll(waitingText, readyButton);
         readyBox.layoutXProperty().bind(
-            gamePane.widthProperty().divide(2).subtract(100)
-        );
+                gamePane.widthProperty().divide(2).subtract(100));
         readyBox.layoutYProperty().bind(
-            gamePane.heightProperty().divide(2)
-        );
-        
+                gamePane.heightProperty().divide(2));
+
         gamePane.getChildren().add(readyBox);
     }
+
+    // 修改障礙物發送邏輯
+    private void sendGameState() {
+        try {
+            GameState localState = new GameState();
+            localState.playerLane = currentLane;
+            localState.score = score;
+            localState.lives = lives;
+
+            // 轉換障礙物為可序列化格式
+            if (isHost && !obstacles.isEmpty()) {
+                ArrayList<NetworkManager.SerializableObstacle> serializableObstacles = new ArrayList<>();
+                for (ImageView obs : obstacles) {
+                    serializableObstacles.add(new NetworkManager.SerializableObstacle(obs));
+                }
+                localState.obstacles = serializableObstacles;
+            }
+
+            networkManager.sendGameState(localState);
+        } catch (IOException e) {
+            handleNetworkError();
+        }
+    }
+
+    // 修改障礙物接收邏輯
+    private void receiveGameState() {
+        try {
+            GameState remoteState = networkManager.receiveGameState();
+
+            // 更新玩家狀態
+            if (remoteState.playerLane != currentLane) {
+                currentLane = remoteState.playerLane;
+                updatePlayerPosition();
+            }
+            score = remoteState.score;
+            lives = remoteState.lives;
+
+            // 同步障礙物
+            if (isHost) {
+                syncObstacles(remoteState.obstacles);
+            } else {
+                if (remoteState.obstacles != null) {
+                    obstacles.clear();
+                    for (NetworkManager.SerializableObstacle so : remoteState.obstacles) {
+                        ImageView obs = so.toImageView();
+                        obstacles.add(obs);
+                        gamePane.getChildren().add(obs);
+                    }
+                }
+            }
+
+            // 更新分數和生命顯示
+            scoreText.setText("Score: " + score);
+            lifeText.setText("Lives: " + lives);
+            player2ScoreText.setText("Player 2 Score: " + player2Score);
+            player2LifeText.setText("Player 2 Lives: " + player2Lives);
+
+            lastReceivedTime = System.currentTimeMillis();
+        } catch (IOException | ClassNotFoundException e) {
+            handleNetworkError();
+        }
+    }
+
+    // 驗證 IP 地址
+    private boolean validateIP(String ip) {
+        String pattern = "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$";
+        return ip.matches(pattern);
+    }
 }
-
-
