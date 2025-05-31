@@ -4,6 +4,8 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 
@@ -19,21 +21,28 @@ public class NetworkManager {
         public double y;
         public double width;
         public double height;
+        public String imagePath; // 新增圖片路徑欄位
         
-        // 由 Rectangle 建立
-        public SerializableObstacle(Rectangle rect) {
-            this.x = rect.getLayoutX();
-            this.y = rect.getLayoutY();
-            this.width = rect.getWidth();
-            this.height = rect.getHeight();
-        }
         
-        // 轉換回 Rectangle
-        public Rectangle toRectangle() {
-            Rectangle rect = new Rectangle(width, height, Color.RED);
-            rect.setLayoutX(x);
-            rect.setLayoutY(y);
-            return rect;
+        // 由 ImageView 建立
+        public SerializableObstacle(ImageView obs) {
+            this.imagePath = (String) obs.getUserData(); // 取得圖片路徑
+            this.width = obs.getFitWidth();
+            this.height = obs.getFitHeight();
+            this.x = obs.getLayoutX();
+            this.y = obs.getLayoutY();
+        }            
+        
+        public ImageView toImageView() {
+            // 需要正確還原圖片路徑與位置
+            Image img = new Image(getClass().getResourceAsStream(this.imagePath));
+            ImageView view = new ImageView(img);
+            view.setFitWidth(this.width);
+            view.setFitHeight(this.height);
+            view.setLayoutX(this.x);
+            view.setLayoutY(this.y);
+            view.setUserData(this.imagePath); // 保持一致
+            return view;
         }
     }
     

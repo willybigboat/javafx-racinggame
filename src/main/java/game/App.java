@@ -7,7 +7,7 @@ import javafx.stage.Stage;
 public class App extends Application {
 
     // 定義統一的視窗大小常數
-    public static final double WINDOW_WIDTH = 600;
+    public static final double WINDOW_WIDTH = 1200;
     public static final double WINDOW_HEIGHT = 800;
 
     private Stage primaryStage;
@@ -19,7 +19,6 @@ public class App extends Application {
     @Override
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
-        primaryStage.setTitle("賽車遊戲");
 
         // 設定視窗最小大小
         primaryStage.setMinWidth(WINDOW_WIDTH);
