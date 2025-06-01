@@ -11,10 +11,11 @@ public class App extends Application {
     public static final double WINDOW_HEIGHT = 800;
 
     private Stage primaryStage;
-    private Scene homeScene, singlePlayerScene, multiPlayerScene, gameOverScene;
+    private Scene homeScene, singlePlayerScene, multiPlayerScene, gameOverScene,mulgameOverScene;
     private GameOverPage gameOverPage;
     private SinglePlayerPage singlePlayerPage;
     private MultiPlayerPage multiPlayerPage;
+    private mulGameOverPage mulgameOverPage;
 
     @Override
     public void start(Stage primaryStage) {
@@ -29,12 +30,14 @@ public class App extends Application {
         singlePlayerPage = new SinglePlayerPage(this);
         multiPlayerPage = new MultiPlayerPage(this);
         gameOverPage = new GameOverPage(this);
+        mulgameOverPage = new mulGameOverPage(this);
 
         // 建立場景並使用統一大小
         homeScene = new Scene(homePage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
         singlePlayerScene = new Scene(singlePlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
         multiPlayerScene = new Scene(multiPlayerPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
         gameOverScene = new Scene(gameOverPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
+        mulgameOverScene = new Scene(mulgameOverPage.createContent(), WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // 顯示首頁
         primaryStage.setScene(homeScene);
@@ -87,13 +90,22 @@ public class App extends Application {
     multiPlayerPage.showWaitingPage();
 }
 
-    // 切換到遊戲結束頁面
+    // 切換到遊戲結束頁面(單人模式)
     public void switchToGameOver() {
         gameOverPage.setScores(singlePlayerPage.getScore(), singlePlayerPage.getHighScore());
         // 刷新 GameOverPage 的內容
         gameOverScene = new Scene(gameOverPage.createContent());
         primaryStage.setScene(gameOverScene);
     }
+
+    // 切換到遊戲結束頁面(連機模式)
+    /*public void switchToMulGameOver() {
+        mulgameOverPage.setScores(multiPlayerPage.getScore(), 0);
+        // 刷新 GameOverPage 的內容
+        mulgameOverScene = new Scene(mulgameOverPage.createContent());
+        primaryStage.setScene(mulgameOverScene);
+    }*/
+
 
     // 返回首頁 (如果需要)
     public void switchToHomePage() {
@@ -107,6 +119,12 @@ public class App extends Application {
 
     public static void main(String[] args) {
         launch(args);
+    }
+
+    public void setScene(Scene scene) {
+        if (primaryStage != null) {
+        primaryStage.setScene(scene);
+    }
     }
 
 }
