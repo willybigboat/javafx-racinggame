@@ -105,6 +105,14 @@ public class MultiPlayerPage {
 
     public MultiPlayerPage(App app) {
         this.app = app;
+
+        // 每次建立新的網路管理器
+        this.networkManager = new NetworkManager();
+
+        // 將網路管理器設置到 App 中，方便後續訪問
+        if (app != null) {
+            app.setCurrentNetworkManager(this.networkManager);
+        }
     }
 
     @SuppressWarnings("exports")
@@ -360,12 +368,29 @@ public class MultiPlayerPage {
         return playerPane;
     }
 
+    // 在 startNetworkSync 方法中添加更多的安全保護
+    private Thread networkSyncThread; // 新增成員變數來追蹤網路同步執行緒
+
     private void startNetworkSync() {
-        new Thread(() -> {
+        // 如果先前的同步執行緒存在，先嘗試中斷它
+        if (networkSyncThread != null && networkSyncThread.isAlive()) {
+            networkSyncThread.interrupt();
+            System.out.println("中斷舊的網路同步執行緒");
+        }
+
+        networkSyncThread = new Thread(() -> {
             String threadName = (isHost ? "主機" : "客戶端") + "-網路同步";
             System.out.println(threadName + " 執行緒已啟動");
+
+            long lastValidReceiveTime = System.currentTimeMillis();
+
             while (!gameOver) {
                 try {
+                    if (Thread.currentThread().isInterrupted()) {
+                        System.out.println(threadName + " 執行緒被中斷");
+                        break;
+                    }
+
                     long now = System.currentTimeMillis();
 
                     // 控制同步頻率
@@ -373,29 +398,40 @@ public class MultiPlayerPage {
                         sendGameState();
                         receiveGameState(); // 可能發生阻塞或異常
                         lastNetworkSync = now;
+                        lastValidReceiveTime = now; // 成功收發後更新此值
                     }
 
                     // 檢查是否長時間沒收到對方資訊
-                    if (now - lastReceivedTime > NETWORK_TIMEOUT) {
-                        System.err.println(threadName + " 連線逾時: " + (now - lastReceivedTime) + "ms");
+                    if (now - lastValidReceiveTime > NETWORK_TIMEOUT) {
+                        System.err.println(threadName + " 連線逾時: " + (now - lastValidReceiveTime) + "ms");
                         throw new IOException("連線逾時，超過 " + NETWORK_TIMEOUT + "ms 未收到數據");
                     }
 
                     Thread.sleep(5); // 釋放CPU
+                } catch (InterruptedException ie) {
+                    System.out.println(threadName + " 執行緒被中斷");
+                    break;
                 } catch (IOException e) {
                     System.err.println(threadName + " 發生錯誤: " + e.getMessage());
                     e.printStackTrace();
-                    handleNetworkError();
+                    if (!gameOver) { // 只在遊戲未結束時處理網路錯誤
+                        handleNetworkError();
+                    }
                     break;
                 } catch (Exception e) {
                     System.err.println(threadName + " 未知錯誤: " + e.getMessage());
                     e.printStackTrace();
-                    handleNetworkError();
+                    if (!gameOver) { // 只在遊戲未結束時處理網路錯誤
+                        handleNetworkError();
+                    }
                     break;
                 }
             }
-            System.out.println(threadName + " 執行緒已終止。"); // 執行緒結束日誌
-        }).start();
+            System.out.println(threadName + " 執行緒已終止。gameOver = " + gameOver);
+        }, "NetworkSyncThread");
+
+        networkSyncThread.setDaemon(true); // 設置為守護執行緒，這樣主程式結束時它也會結束
+        networkSyncThread.start();
     }
 
     // 新增障礙物同步方法 (此方法在客戶端 receiveGameState 中調用)
@@ -472,13 +508,13 @@ public class MultiPlayerPage {
             new Thread(() -> { // 主機的阻塞操作也應該在獨立執行緒中
                 try {
                     System.out.println("主機：等待客戶端準備好信號...");
-                    GameState clientState = networkManager.receiveGameState(); // 阻塞調用
+                    GameState clientState = networkManager.receiveCompressedGameState(); // 阻塞調用
                     System.out.println("主機：收到客戶端準備好信號，isReady = " + clientState.isReady);
                     if (clientState.isReady) {
                         // 發送開始倒計時信號
                         GameState startSignal = new GameState();
                         startSignal.gameStarting = true;
-                        networkManager.sendGameState(startSignal);
+                        networkManager.sendCompressedGameState(startSignal);
                         Platform.runLater(() -> startCountdown(countdownText));
                     }
                 } catch (Exception e) {
@@ -493,12 +529,12 @@ public class MultiPlayerPage {
                     // 客戶端發送準備好信號
                     GameState readySignal = new GameState();
                     readySignal.isReady = true;
-                    networkManager.sendGameState(readySignal);
+                    networkManager.sendCompressedGameState(readySignal);
                     System.out.println("客戶端：已發送準備好信號。");
 
                     // 等待主機開始信號
                     System.out.println("客戶端：等待主機開始信號...");
-                    GameState hostState = networkManager.receiveGameState(); // 阻塞調用
+                    GameState hostState = networkManager.receiveCompressedGameState(); // 阻塞調用
                     System.out.println("客戶端：收到主機開始信號，gameStarting = " + hostState.gameStarting);
                     if (hostState.gameStarting) {
                         Platform.runLater(() -> startCountdown(countdownText));
@@ -631,30 +667,69 @@ public class MultiPlayerPage {
     }
 
     private void update() {
-        if (localEliminated) {
+        // 如果遊戲已結束，直接返回
+        if (gameOver) {
             return;
         }
-        if (isHost) {
-            updateLocalPlayerAndObstacles(); // 主機更新自己的玩家和障礙物
-        } else {
-            // 客戶端只移動障礙物與檢查碰撞 (針對本地障礙物)
-            moveObstacles(); // 移動 localObstacles 和 remoteObstacles
-            checkCollision(); // 檢查本地玩家與 localObstacles 的碰撞
-            // Platform.runLater(() -> scoreText.setText("Score: " + score)); // 確保在 UI
-            // 執行緒更新
-            Platform.runLater(() -> {
-                String localScoreLabel = isHost ? "玩家1分數: " : "玩家2分數: ";
-                String localLifeLabel = isHost ? "玩家1生命: " : "玩家2生命: ";
-                String remoteScoreLabel = isHost ? "玩家2分數: " : "玩家1分數: ";
-                String remoteLifeLabel = isHost ? "玩家2生命: " : "玩家1生命: ";
 
-                scoreText.setText(localScoreLabel + score);
-                lifeText.setText(localLifeLabel + lives);
-                remotePlayerScoreText.setText(remoteScoreLabel + remotePlayerScore);
-                remotePlayerLifeText.setText(remoteLifeLabel + remotePlayerLives);
-            });
+        // 如果雙方都已淘汰，檢查遊戲結束
+        if (localEliminated && remoteEliminated) {
+            Platform.runLater(() -> checkGameOver());
+            return;
         }
-        updateRemotePlayer(); // 更新遠端玩家的畫面
+
+        // 主機端邏輯
+        if (isHost) {
+            if (localEliminated) {
+                // 主機淘汰後，只觀察遠端玩家狀態
+                Platform.runLater(() -> {
+                    String localScoreLabel = "玩家1分數: ";
+                    String localLifeLabel = "玩家1生命: ";
+                    String remoteScoreLabel = "玩家2分數: ";
+                    String remoteLifeLabel = "玩家2生命: ";
+
+                    scoreText.setText(localScoreLabel + score);
+                    lifeText.setText(localLifeLabel + lives);
+                    remotePlayerScoreText.setText(remoteScoreLabel + remotePlayerScore);
+                    remotePlayerLifeText.setText(remoteLifeLabel + remotePlayerLives);
+                });
+            } else {
+                updateLocalPlayerAndObstacles();
+            }
+        }
+        // 客戶端邏輯
+        else {
+            if (localEliminated) {
+                // 客戶端淘汰後，只觀察遠端玩家狀態
+                Platform.runLater(() -> {
+                    String localScoreLabel = "玩家2分數: ";
+                    String localLifeLabel = "玩家2生命: ";
+                    String remoteScoreLabel = "玩家1分數: ";
+                    String remoteLifeLabel = "玩家1生命: ";
+
+                    scoreText.setText(localScoreLabel + score);
+                    lifeText.setText(localLifeLabel + lives);
+                    remotePlayerScoreText.setText(remoteScoreLabel + remotePlayerScore);
+                    remotePlayerLifeText.setText(remoteLifeLabel + remotePlayerLives);
+                });
+            } else {
+                generateObstacles();
+                moveObstacles();
+                checkCollision();
+                Platform.runLater(() -> {
+                    String localScoreLabel = "玩家2分數: ";
+                    String localLifeLabel = "玩家2生命: ";
+                    String remoteScoreLabel = "玩家1分數: ";
+                    String remoteLifeLabel = "玩家1生命: ";
+
+                    scoreText.setText(localScoreLabel + score);
+                    lifeText.setText(localLifeLabel + lives);
+                    remotePlayerScoreText.setText(remoteScoreLabel + remotePlayerScore);
+                    remotePlayerLifeText.setText(remoteLifeLabel + remotePlayerLives);
+                });
+            }
+        }
+        updateRemotePlayer();
     }
 
     // 更新本地玩家和障礙物的畫面 (主機端)
@@ -693,9 +768,6 @@ public class MultiPlayerPage {
 
     // 修改障礙物生成邏輯，只由主機生成
     private void generateObstacles() {
-        if (!isHost)
-            return; // 只有主機生成障礙物
-
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastObstacleTime < 1000) {
             return;
@@ -718,91 +790,45 @@ public class MultiPlayerPage {
 
             String imgPath = OBSTACLE_IMAGES[rand.nextInt(OBSTACLE_IMAGES.length)];
 
-            // 為本地玩家畫面創建 ImageView
-            ImageView obstacleForLocalPlayer = new ImageView();
+            // 只為本地玩家畫面創建 ImageView
+            ImageView obstacle = new ImageView();
             Image obsImg = null;
             try {
                 obsImg = new Image(getClass().getResourceAsStream(imgPath));
                 if (obsImg != null && obsImg.isError()) {
-                    System.err.println("警告：主機：載入障礙物圖片發生錯誤: " + imgPath);
                     obsImg = null;
                 }
             } catch (Exception e) {
-                System.err.println("錯誤：主機：無法載入障礙物圖片: " + imgPath + " - " + e.getMessage());
-                e.printStackTrace();
                 obsImg = null;
             }
 
             if (obsImg == null) {
-                System.err.println("警告：主機：障礙物圖片 " + imgPath + " 載入失敗。嘗試使用預設紅色方塊。");
                 try {
                     obsImg = new Image(getClass().getResourceAsStream("/image/redBlock.png"));
-                    if (obsImg != null && obsImg.isError()) {
-                        System.err.println("致命錯誤：主機：載入備用障礙物圖片也失敗。");
-                        obsImg = null; // 最終失敗
-                    }
                 } catch (Exception e) {
-                    System.err.println("致命錯誤：主機：無法載入備用障礙物圖片: " + e.getMessage());
-                    obsImg = null; // 最終失敗
+                    System.err.println("無法載入任何障礙物圖片");
+                    continue; // 跳過此障礙物
                 }
             }
 
-            if (obsImg != null) {
-                obstacleForLocalPlayer.setImage(obsImg);
-            } else {
-                System.err.println("嚴重錯誤：主機：無法為障礙物設置圖片，將使用一個空的 ImageView。");
-            }
+            obstacle.setImage(obsImg);
+            obstacle.setFitWidth(60);
+            obstacle.setFitHeight(60);
+            obstacle.setUserData(new Object[] { imgPath, lane });
 
-            obstacleForLocalPlayer.setFitWidth(60);
-            obstacleForLocalPlayer.setFitHeight(60);
-            // Store imgPath and lane in userData for later serialization
-            obstacleForLocalPlayer.setUserData(new Object[] { imgPath, lane });
+            double obstacleY = -obstacle.getFitHeight();
+            double trackWidth = getTrackWidthAtY(obstacleY, player1Pane.getHeight());
+            double laneWidthVal = trackWidth / lanes;
+            double trackCenterX = player1Pane.getWidth() / 2.0;
+            double trackLeftX = trackCenterX - trackWidth / 2.0;
+            double obstacleX = trackLeftX + lane * laneWidthVal + (laneWidthVal - obstacle.getFitWidth()) / 2.0;
+            obstacle.setLayoutX(obstacleX);
+            obstacle.setLayoutY(obstacleY);
 
-            // Calculate position for local player obstacle
-            double obstacleY1 = -obstacleForLocalPlayer.getFitHeight();
-            double trackWidth1 = getTrackWidthAtY(obstacleY1, player1Pane.getHeight());
-            double laneWidthVal1 = trackWidth1 / lanes;
-            double trackCenterX1 = player1Pane.getWidth() / 2.0;
-            double trackLeftX1 = trackCenterX1 - trackWidth1 / 2.0;
-            double obstacleX1 = trackLeftX1 + lane * laneWidthVal1
-                    + (laneWidthVal1 - obstacleForLocalPlayer.getFitWidth()) / 2.0;
-            obstacleForLocalPlayer.setLayoutX(obstacleX1);
-            obstacleForLocalPlayer.setLayoutY(obstacleY1);
+            localObstacles.add(obstacle); // 只添加到本地障礙物列表
 
-            // 為遠端玩家畫面創建 ImageView (視覺副本)
-            ImageView obstacleForRemotePlayer = new ImageView();
-            if (obsImg != null) { // 使用相同的已載入圖片，如果成功的話
-                obstacleForRemotePlayer.setImage(obsImg);
-            } else {
-                System.err.println("嚴重錯誤：主機：無法為遠端障礙物設置圖片，將使用一個空的 ImageView。");
-            }
-            obstacleForRemotePlayer.setFitWidth(60);
-            obstacleForRemotePlayer.setFitHeight(60);
-            obstacleForRemotePlayer.setUserData(new Object[] { imgPath, lane }); // 也儲存以保持一致性
-
-            // 計算遠端玩家障礙物的位置 (假設面板尺寸相同)
-            double obstacleY2 = -obstacleForRemotePlayer.getFitHeight();
-            double trackWidth2 = getTrackWidthAtY(obstacleY2, player2Pane.getHeight());
-            double laneWidthVal2 = trackWidth2 / lanes;
-            double trackCenterX2 = player2Pane.getWidth() / 2.0;
-            double trackLeftX2 = trackCenterX2 - trackWidth2 / 2.0;
-            double obstacleX2 = trackLeftX2 + lane * laneWidthVal2
-                    + (laneWidthVal2 - obstacleForRemotePlayer.getFitWidth()) / 2.0;
-            obstacleForRemotePlayer.setLayoutX(obstacleX2);
-            obstacleForRemotePlayer.setLayoutY(obstacleY2);
-
-            localObstacles.add(obstacleForLocalPlayer); // 添加到本地障礙物列表
-            remoteObstacles.add(obstacleForRemotePlayer); // 添加到遠端障礙物列表
-
-            // 為了解決 "Local variable is required to be final or effectively final" 錯誤
-            // 創建 final 副本以在 lambda 中使用
-            final ImageView finalObstacleForLocalPlayer = obstacleForLocalPlayer;
-            final ImageView finalObstacleForRemotePlayer = obstacleForRemotePlayer;
-
-            Platform.runLater(() -> {
-                player1Pane.getChildren().add(finalObstacleForLocalPlayer); // 添加到本地玩家畫面
-                player2Pane.getChildren().add(finalObstacleForRemotePlayer); // 添加到遠端玩家畫面
-            });
+            final ImageView finalObstacle = obstacle;
+            Platform.runLater(() -> player1Pane.getChildren().add(finalObstacle)); // 只添加到本地玩家畫面
 
             lastUsedLane = lane;
             count++;
@@ -840,17 +866,20 @@ public class MultiPlayerPage {
                 obs.setLayoutX(obstacleX);
             }
 
-            if (newY > player1Pane.getHeight()) {
-                if (isHost) { // 只有主機端負責移除本地障礙物和計分
-                    Platform.runLater(() -> player1Pane.getChildren().remove(obs));
-                    localIter.remove();
-                    score++;
-                    if (score % 10 == 0) {
-                        speed += 1.5;
-                    }
-                } else {
-                    // 客戶端不主動移除本地障礙物，等待同步
+            // 檢查此障礙物是否已加過分（統一使用同樣的屬性標記）
+            Boolean scored = (Boolean) obs.getProperties().getOrDefault("scored", false);
+
+            // 如果障礙物超出畫面範圍且還未計分
+            if (newY > player1Pane.getHeight() && !scored) {
+                // 不論主機或客戶端，都採用相同邏輯：加分、移除障礙物
+                score++;
+                if (score % 10 == 0) {
+                    speed += 1.5;
                 }
+
+                // 從UI和列表中移除障礙物（兩端完全相同）
+                Platform.runLater(() -> player1Pane.getChildren().remove(obs));
+                localIter.remove();
             }
         }
 
@@ -881,9 +910,10 @@ public class MultiPlayerPage {
                 obs.setLayoutX(obstacleX);
             }
 
+            // 遠端障礙物移出畫面時從UI和列表中移除（兩端完全相同）
             if (newY > player2Pane.getHeight()) {
-                // 遠端畫面上的障礙物是視覺副本，它們的移除由 syncObstacles 處理
-                // 不在這裡基於 Y 座標移除，否則會導致不同步
+                Platform.runLater(() -> player2Pane.getChildren().remove(obs));
+                remoteIter.remove();
             }
         }
     }
@@ -933,16 +963,52 @@ public class MultiPlayerPage {
             timer = null;
         }
         Platform.runLater(() -> {
+            // 顯示淘汰訊息
             Text eliminatedText = new Text("你已淘汰，等待其他玩家結束...");
             eliminatedText.setStyle("-fx-font-size: 28px; -fx-fill: orange; -fx-stroke: black; -fx-stroke-width: 1;");
             eliminatedText.setLayoutX(player1Pane.getWidth() / 2 - 150);
             eliminatedText.setLayoutY(player1Pane.getHeight() / 2);
             player1Pane.getChildren().add(eliminatedText);
+
+            // 重要：當玩家被淘汰時，清除自己畫面上的障礙物
+            player1Pane.getChildren().removeAll(localObstacles);
+            localObstacles.clear();
+
+            // 確保在 UI 執行緒中立即檢查遊戲結束條件
+            checkGameOver();
         });
-        checkGameOver();
+
+        // 建立一個新的 Timer 來處理對手畫面更新（只同步對手畫面，不處理自己畫面）
+        timer = new AnimationTimer() {
+            @Override
+            public void handle(long now) {
+                if (!gameOver) {
+                    updateRemotePlayerOnly();
+                }
+            }
+        };
+        timer.start();
     }
 
-    // 3. 遠端玩家淘汰時顯示提示
+    // 新增方法：只更新遠端玩家
+    private void updateRemotePlayerOnly() {
+        // 更新分數顯示
+        Platform.runLater(() -> {
+            String localScoreLabel = isHost ? "玩家1分數: " : "玩家2分數: ";
+            String localLifeLabel = isHost ? "玩家1生命: " : "玩家2生命: ";
+            String remoteScoreLabel = isHost ? "玩家2分數: " : "玩家1分數: ";
+            String remoteLifeLabel = isHost ? "玩家2生命: " : "玩家1生命: ";
+
+            scoreText.setText(localScoreLabel + score);
+            lifeText.setText(localLifeLabel + lives);
+            remotePlayerScoreText.setText(remoteScoreLabel + remotePlayerScore);
+            remotePlayerLifeText.setText(remoteLifeLabel + remotePlayerLives);
+
+            // 更新遠端玩家位置
+            updateRemotePlayerPosition();
+        });
+    }
+
     private void onRemoteEliminated() {
         Platform.runLater(() -> {
             Text infoText = new Text("對方已淘汰，你可以繼續挑戰高分！");
@@ -950,14 +1016,53 @@ public class MultiPlayerPage {
             infoText.setLayoutX(player1Pane.getWidth() / 2 - 120);
             infoText.setLayoutY(40);
             player1Pane.getChildren().add(infoText);
+
+            // 重要：當遠端玩家被淘汰時，清除遠端畫面上的障礙物
+            player2Pane.getChildren().removeAll(remoteObstacles);
+            remoteObstacles.clear();
+
+            // 確保在 UI 執行緒中立即檢查遊戲結束條件
+            checkGameOver();
         });
-        checkGameOver();
     }
 
     // 4. 雙方都淘汰時跳轉到 mulGameOverPage
     private void checkGameOver() {
-        if (localEliminated && remoteEliminated) {
+        System.out.println("[CheckGameOver] localEliminated=" + localEliminated + ", remoteEliminated="
+                + remoteEliminated + ", gameOver=" + gameOver);
+
+        if ((localEliminated && remoteEliminated) || gameOver) {
+            if (!gameOver) {
+                gameOver = true;
+                System.out.println("[CheckGameOver] 雙方均已淘汰，設置 gameOver = true");
+
+                // 確保最後一次傳送遊戲結束標記
+                try {
+                    GameState endState = new GameState();
+                    endState.playerLane = currentLane;
+                    endState.score = score;
+                    endState.lives = lives;
+                    endState.gameEnded = true;
+                    networkManager.sendCompressedGameState(endState);
+                    System.out.println("[CheckGameOver] 已發送遊戲結束標記");
+                } catch (IOException e) {
+                    System.err.println("[CheckGameOver] 發送結束狀態時錯誤: " + e.getMessage());
+                }
+            }
+
+            // 清理資源，但不關閉網路連線
+            cleanup();
+
+            // 確保已非同步處理任何網路資源
             Platform.runLater(() -> {
+                try {
+                    Thread.sleep(200); // 給網路執行緒一些時間來處理最後的訊息
+                } catch (InterruptedException e) {
+                    // 忽略中斷
+                }
+
+                // 跳轉到結算畫面
+                System.out.println("[CheckGameOver] 準備轉換到結算畫面");
                 mulGameOverPage gameOverPage = new mulGameOverPage(app);
                 int player1Score = isHost ? score : remotePlayerScore;
                 int player2Score = isHost ? remotePlayerScore : score;
@@ -1031,11 +1136,19 @@ public class MultiPlayerPage {
     }
 
     private void handleNetworkError() {
-        System.err.println("處理網路錯誤，遊戲結束。");
+        System.err.println("處理網路錯誤。gameOver = " + gameOver);
+
+        // 如果遊戲已結束，不再處理網路錯誤（避免誤報）
+        if (gameOver) {
+            System.out.println("遊戲已結束，忽略網路錯誤");
+            return;
+        }
+
         gameOver = true;
         if (timer != null) {
             timer.stop();
         }
+
         Platform.runLater(() -> {
             showError("網路連線中斷");
             app.switchToHomePage();
@@ -1083,7 +1196,7 @@ public class MultiPlayerPage {
                         System.out.println("主機：發送開始遊戲信號。");
                         GameState startSignal = new GameState();
                         startSignal.gameStarting = true;
-                        networkManager.sendGameState(startSignal);
+                        networkManager.sendCompressedGameState(startSignal);
 
                         Platform.runLater(() -> {
                             Text countdownText = new Text();
@@ -1111,7 +1224,7 @@ public class MultiPlayerPage {
                     while (clientWaitingForStartSignal && !gameOver && !clientGameHasStarted
                             && !clientListenerShouldExit) {
                         System.out.println("客戶端: 等待主機開始信號...");
-                        GameState hostState = networkManager.receiveGameState(); // 阻塞調用
+                        GameState hostState = networkManager.receiveCompressedGameState(); // 阻塞調用
                         System.out.println("客戶端: 收到遊戲狀態，gameStarting = " + hostState.gameStarting);
 
                         if (hostState != null && hostState.gameStarting) {
@@ -1179,19 +1292,37 @@ public class MultiPlayerPage {
             localState.score = score;
             localState.lives = lives;
 
-            if (isHost) {
-                ArrayList<NetworkManager.SerializableObstacle> serializableObstacles = new ArrayList<>();
-                // 主機只發送一份障礙物資料，客戶端會根據這份資料在兩個 Pane 上繪製
-                for (ImageView obs : localObstacles) { // 從本地障礙物列表獲取資料
-                    Object[] data = (Object[]) obs.getUserData(); // 獲取存儲的 Object[]
-                    String imgPath = (String) data[0];
-                    int lane = (Integer) data[1];
+            ArrayList<NetworkManager.SerializableObstacle> serializableObstacles = new ArrayList<>();
+            for (ImageView obs : localObstacles) {
+                Object userDataContent = obs.getUserData();
+                String imgPath = null;
+                int lane = -1;
+
+                if (userDataContent instanceof Integer) {
+                    lane = (Integer) userDataContent;
+                    imgPath = "/image/redBlock.png"; // 預設圖片
+                } else if (userDataContent instanceof Object[]) {
+                    Object[] data = (Object[]) userDataContent;
+                    if (data.length > 0 && data[0] instanceof String) {
+                        imgPath = (String) data[0];
+                    }
+                    if (data.length > 1 && data[1] instanceof Integer) {
+                        lane = (Integer) data[1];
+                    }
+                }
+
+                if (imgPath != null && lane >= 0) {
                     serializableObstacles.add(new NetworkManager.SerializableObstacle(obs, imgPath, lane));
                 }
-                localState.obstacles = serializableObstacles;
+            }
+            localState.obstacles = serializableObstacles;
+
+            // 重要！增加遊戲結束狀態標記
+            if (localEliminated && remoteEliminated) {
+                localState.gameEnded = true; // 雙方都結束時，發送結束標記
             }
 
-            networkManager.sendGameState(localState);
+            networkManager.sendCompressedGameState(localState);
         } catch (IOException e) {
             System.err.println("發送遊戲狀態時發生錯誤: " + e.getMessage());
             e.printStackTrace();
@@ -1202,47 +1333,62 @@ public class MultiPlayerPage {
     // 修改障礙物接收邏輯
     private void receiveGameState() {
         try {
-            GameState remoteState = networkManager.receiveGameState();
+            GameState remoteState = networkManager.receiveCompressedGameState();
+
+            // 如果收到遊戲結束標記，立即檢查遊戲結束
+            if (remoteState.gameEnded) {
+                gameOver = true;
+                Platform.runLater(() -> checkGameOver());
+                return;
+            }
 
             if (isHost) {
                 remotePlayerLane = remoteState.playerLane;
                 remotePlayerScore = remoteState.score;
                 remotePlayerLives = remoteState.lives;
+                if (remoteState.obstacles != null) {
+                    Platform.runLater(() -> syncRemoteObstacles(remoteState.obstacles));
+                }
                 if (remotePlayerLives <= 0 && !remoteEliminated) {
                     remoteEliminated = true;
                     onRemoteEliminated();
+
+                    // 立即檢查遊戲結束
+                    if (localEliminated) {
+                        Platform.runLater(() -> checkGameOver());
+                    }
                 }
                 Platform.runLater(() -> updateRemotePlayerPosition());
             } else {
-                score = remoteState.score;
-                lives = remoteState.lives;
                 if (remoteState.lives <= 0 && !remoteEliminated) {
                     remoteEliminated = true;
                     onRemoteEliminated();
+
+                    // 立即檢查遊戲結束
+                    if (localEliminated) {
+                        Platform.runLater(() -> checkGameOver());
+                    }
                 }
                 if (lives <= 0 && !localEliminated) {
                     localEliminated = true;
                     onLocalEliminated();
+
+                    // 立即檢查遊戲結束
+                    if (remoteEliminated) {
+                        Platform.runLater(() -> checkGameOver());
+                    }
                 }
                 Platform.runLater(() -> updatePlayerPosition());
-                // 客戶端同步主機的障礙物
-                if (remoteState.obstacles != null) {
-                    syncObstacles(remoteState.obstacles); // 調用同步方法
-                } else {
-                    // 如果遠端沒有障礙物，確保本地障礙物也被清除
-                    Platform.runLater(() -> {
-                        player1Pane.getChildren().removeAll(localObstacles);
-                        localObstacles.clear();
-                        player2Pane.getChildren().removeAll(remoteObstacles);
-                        remoteObstacles.clear();
-                    });
-                }
 
-                // 同步主機玩家位置 (對於客戶端來說，主機玩家是 remotePlayer)
+                // 同步主機玩家位置
                 remotePlayerLane = remoteState.playerLane;
                 remotePlayerScore = remoteState.score;
                 remotePlayerLives = remoteState.lives;
-                Platform.runLater(() -> updateRemotePlayerPosition()); // 確保在 UI 執行緒更新
+                // 即使客戶端淘汰了，仍然同步對手的障礙物
+                if (remoteState.obstacles != null) {
+                    Platform.runLater(() -> syncRemoteObstacles(remoteState.obstacles));
+                }
+                Platform.runLater(() -> updateRemotePlayerPosition());
             }
 
             // 更新分數和生命顯示
@@ -1261,10 +1407,9 @@ public class MultiPlayerPage {
             lastReceivedTime = System.currentTimeMillis();
         } catch (IOException | ClassNotFoundException e) {
             System.err.println("客戶端: receiveGameState - 接收遊戲狀態時發生錯誤: " + e.getMessage());
-            e.printStackTrace(); // 印出詳細錯誤
+            e.printStackTrace();
             handleNetworkError();
         } catch (Exception e) {
-            // 捕捉其他未預期的錯誤
             System.err.println("客戶端: receiveGameState - 接收遊戲狀態時發生未知錯誤: " + e.getMessage());
             e.printStackTrace();
             handleNetworkError();
@@ -1275,5 +1420,69 @@ public class MultiPlayerPage {
     private boolean validateIP(String ip) {
         String pattern = "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$";
         return ip.matches(pattern);
+    }
+
+    private void cleanup() {
+        // 設置遊戲結束標誌，讓所有執行緒知道該停止了
+        gameOver = true;
+
+        // 停止計時器
+        if (timer != null) {
+            timer.stop();
+            timer = null;
+        }
+
+        // 先中斷網路執行緒
+        if (networkSyncThread != null) {
+            networkSyncThread.interrupt();
+            // 給執行緒一些時間來終止
+            try {
+                networkSyncThread.join(500); // 最多等待500ms
+            } catch (InterruptedException e) {
+                System.err.println("等待網路執行緒終止時被中斷");
+            }
+        }
+
+        // 重置變數
+        clientWaitingForStartSignal = false;
+        clientGameHasStarted = false;
+        clientListenerShouldExit = true;
+        localEliminated = false;
+        remoteEliminated = false;
+
+        // 清空集合
+        localObstacles.clear();
+        remoteObstacles.clear();
+
+        // 注意：不在這裡關閉網路連線，讓 mulGameOverPage 在用戶點擊"返回首頁"時關閉
+
+        System.out.println("MultiPlayerPage 資源已清理");
+    }
+
+    private void syncRemoteObstacles(ArrayList<NetworkManager.SerializableObstacle> remoteObsList) {
+        // 清除舊的遠端障礙物
+        player2Pane.getChildren().removeAll(remoteObstacles);
+        remoteObstacles.clear();
+
+        // 如果對手已淘汰，不顯示任何障礙物
+        if (remoteEliminated) {
+            return;
+        }
+
+        // 添加新的遠端障礙物 (只有對手未淘汰時才添加)
+        if (remoteObsList != null) {
+            for (NetworkManager.SerializableObstacle so : remoteObsList) {
+                try {
+                    ImageView newObs = so.toImageView();
+                    if (newObs != null) {
+                        remoteObstacles.add(newObs);
+                        player2Pane.getChildren().add(newObs);
+                    }
+                } catch (Exception e) {
+                    System.err.println("轉換遠端障礙物時發生錯誤: " + e.getMessage());
+                }
+            }
+        }
+        System.out.println("同步了 " + remoteObstacles.size() + " 個遠端障礙物");
     }
 }
