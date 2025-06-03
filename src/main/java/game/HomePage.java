@@ -45,15 +45,13 @@ public class HomePage {
         buttonBox.setPadding(new Insets(100, 0, 0, 0));
 
         StackPane root = new StackPane(canvas);
-
-        // 用一個 VBox 包住標題和按鈕，標題靠上，按鈕在中間
+        
         VBox mainBox = new VBox();
         mainBox.setAlignment(Pos.TOP_CENTER);
         mainBox.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
         mainBox.getChildren().addAll(titleBox, buttonBox);
 
         root.getChildren().add(mainBox);
-        // 修正：使用統一的視窗大小常數
         root.setPrefSize(App.WINDOW_WIDTH, App.WINDOW_HEIGHT);
 
         return root;
